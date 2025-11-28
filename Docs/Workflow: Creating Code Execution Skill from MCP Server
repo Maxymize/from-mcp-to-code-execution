@@ -1,0 +1,659 @@
+Workflow: Creating Code Execution Skill from MCP Server
+================================================================================
+
+This document describes the step-by-step workflow to convert a traditional MCP
+server into a Code Execution skill, following the pattern documented by
+Anthropic to reduce token consumption by 98.7%.
+
+Author: MAXYMIZE
+Date: November 2025
+Reference: https://www.anthropic.com/engineering/code-execution-with-mcp
+
+================================================================================
+
+1.0 PREREQUISITES
+
+Before starting, make sure you have:
+
+1. Target MCP server identified (e.g., `supabase-self-hosted`, `playwright`, etc.)
+2. Access to MCP server tools (to discover available functions)
+3. Understanding of APIs exposed by the server
+
+================================================================================
+
+2.0 COMPLETE WORKFLOW
+
+--------------------------------------------------------------------------------
+PHASE 1: Creating Directory Structure
+--------------------------------------------------------------------------------
+
+Create the necessary folder structure:
+
+```bash
+# Directory for MCP server wrappers
+mkdir -p servers/<server-name>/
+
+# Directory for skill documentation
+mkdir -p .claude/skills/<server-name>-code-exec/
+
+# Workspace directory for temporary outputs (if it doesn't exist)
+mkdir -p workspace/
+```
+
+Example for supabase-self-hosted:
+```bash
+mkdir -p servers/supabase-self-hosted/
+mkdir -p .claude/skills/supabase-code-exec/
+mkdir -p workspace/
+```
+
+--------------------------------------------------------------------------------
+PHASE 2: Creating MCP Client Bridge (if it doesn't exist)
+--------------------------------------------------------------------------------
+
+The `client.ts` file in the project root is the bridge between TypeScript code
+and the JSON-RPC 2.0 protocol. Create it ONCE for the entire project.
+
+client.ts structure:
+
+```typescript
+// client.ts - Structure template
+
+// 1. JSON-RPC 2.0 types
+interface JsonRpcRequest { ... }
+interface JsonRpcResponse { ... }
+
+// 2. MCP server configuration
+interface MCPServerConfig {
+  command: string;      // e.g., 'npx'
+  args: string[];       // e.g., ['-y', '@thequery/mcp-supabase']
+  env?: Record<string, string>;
+}
+
+// 3. Registry of available servers
+const MCP_SERVERS: Record<string, MCPServerConfig> = {
+  'supabase-self-hosted': { ... },
+  'playwright': { ... },
+  // Add new servers here
+};
+
+// 4. Main functions to export:
+export async function callMCPTool<T>(fullToolName: string, params: object): Promise<T>
+export async function listMCPTools(serverName: string): Promise<unknown>
+export function closeMCPServer(serverName: string): void
+export function closeAllMCPServers(): void
+```
+
+IMPORTANT: The convention for fullToolName is `server-name__tool_name`
+(server name with hyphens, double underscore, tool name)
+
+--------------------------------------------------------------------------------
+PHASE 3: Tool Discovery
+--------------------------------------------------------------------------------
+
+To discover which tools the MCP server exposes, there are two approaches:
+
+APPROACH A - If the MCP server is already active in Claude Code system:
+1. Search for available tools starting with `mcp__<server-name>__`
+2. Document name, parameters, and description of each tool
+
+APPROACH B - Direct query to server:
+```typescript
+// Use listMCPTools after implementing the client
+const tools = await listMCPTools('server-name');
+console.log(JSON.stringify(tools, null, 2));
+```
+
+EXPECTED OUTPUT - Tool list with:
+- name: Tool name
+- description: Functional description
+- inputSchema: JSON parameter schema (required/optional, types)
+
+--------------------------------------------------------------------------------
+PHASE 4: Creating Wrapper File for Each Tool
+--------------------------------------------------------------------------------
+
+For EACH discovered tool, create a separate TypeScript file.
+
+NAMING CONVENTIONS:
+- File name: camelCase of tool name (e.g., `get_schemas` → `getSchemas.ts`)
+- Export function name: same as file name without .ts
+
+WRAPPER FILE TEMPLATE:
+
+```typescript
+/**
+ * <Tool Name> - <Brief description>
+ *
+ * @module servers/<server-name>/<fileName>
+ * @see https://www.anthropic.com/engineering/code-execution-with-mcp
+ */
+
+import { callMCPTool } from '../../client.js';
+
+// 1. INTERFACES - Define types for params and results
+interface <ToolName>Params {
+  required_param: string;
+  optional_param?: string;
+}
+
+interface <ToolName>Result {
+  // Result structure
+}
+
+// 2. MAIN FUNCTION
+/**
+ * <Complete tool description copied/adapted from MCP documentation>
+ *
+ * SAFETY: <Indicate risk level: LOW/MEDIUM/HIGH/EXTREME>
+ *
+ * @param <param1> <description>
+ * @param <param2> <description>
+ * @returns Promise with <result description>
+ *
+ * @example
+ * const result = await <functionName>(<example parameters>);
+ */
+export async function <functionName>(
+  param1: string,
+  param2?: string
+): Promise<<ToolName>Result> {
+  const params: <ToolName>Params = { required_param: param1 };
+
+  if (param2) {
+    params.optional_param = param2;
+  }
+
+  return callMCPTool<<ToolName>Result>('<server-name>__<tool_name>', params);
+}
+
+// 3. TEST BLOCK (optional but recommended)
+if (require.main === module) {
+  (async () => {
+    console.log('Testing <functionName>...');
+    try {
+      const result = await <functionName>(<test params>);
+      console.log('✓ Success:', JSON.stringify(result, null, 2));
+    } catch (e) {
+      console.error('✗ Error:', e);
+    }
+    process.exit(0);
+  })();
+}
+```
+
+SAFETY LEVELS TO DOCUMENT:
+- LOW: Read-only operations (SELECT, GET, LIST)
+- MEDIUM: Write operations (INSERT, UPDATE, POST)
+- HIGH: Schema operations (CREATE, ALTER)
+- EXTREME: Destructive operations (DROP, DELETE, TRUNCATE)
+
+--------------------------------------------------------------------------------
+PHASE 5: Creating Index.ts with Exports
+--------------------------------------------------------------------------------
+
+Create `servers/<server-name>/index.ts` that exports all tools.
+
+INDEX.TS TEMPLATE:
+
+```typescript
+/**
+ * <Server Name> MCP Tools
+ *
+ * Progressive disclosure pattern - import only what you need.
+ * Code Execution pattern for up to 98.7% token reduction.
+ *
+ * @see https://www.anthropic.com/engineering/code-execution-with-mcp
+ * @module servers/<server-name>
+ *
+ * @example
+ * // Import only necessary tools (progressive disclosure)
+ * import { tool1, tool2 } from './servers/<server-name>';
+ */
+
+// ============================================================================
+// CATEGORY 1: <e.g., READ OPERATIONS>
+// ============================================================================
+
+/**
+ * <Brief tool description>
+ * SAFETY: <level>
+ */
+export { functionName1 } from './functionName1.js';
+
+// ============================================================================
+// CATEGORY 2: <e.g., WRITE OPERATIONS>
+// ============================================================================
+
+export { functionName2 } from './functionName2.js';
+
+// ... other categories
+
+// ============================================================================
+// RE-EXPORT CLIENT (for advanced use)
+// ============================================================================
+
+export { callMCPTool, listMCPTools, closeMCPServer } from '../../client.js';
+```
+
+TIP: Group exports by functional category (Read, Write, Schema, Auth, Logs, etc.)
+to facilitate navigation.
+
+--------------------------------------------------------------------------------
+PHASE 6: Creating SKILL.md Documentation
+--------------------------------------------------------------------------------
+
+Create `.claude/skills/<name>-code-exec/SKILL.md` with skill documentation.
+
+SKILL.MD TEMPLATE:
+
+```markdown
+---
+name: <name>-code-exec
+description: <Brief description for automatic discovery>
+---
+
+# <Name> Code Execution Skill
+
+<Introduction and motivation>
+
+## Why use this skill?
+
+### Problem with Traditional MCP
+- Loads all tool definitions into context: **~X tokens**
+- Every intermediate result transits through context
+- High latency for complex operations
+
+### Code Execution Solution
+- Loads ONLY necessary tools: **~Y tokens**
+- Data processed locally
+- **Z% reduction** in token consumption
+
+## Tool Structure
+
+```
+servers/<server-name>/
+├── index.ts           # Entry point
+├── tool1.ts           # ...
+└── tool2.ts           # ...
+```
+
+## Usage Workflow
+
+### 1. <Use case 1>
+
+```typescript
+// Code example
+```
+
+### 2. <Use case 2>
+
+```typescript
+// Code example
+```
+
+## Safety Levels
+
+| Operation | Level | Requires |
+|-----------|-------|----------|
+| ... | ... | ... |
+
+## Best Practices
+
+### ✅ DO
+1. ...
+2. ...
+
+### ❌ DON'T
+1. ...
+2. ...
+
+## Troubleshooting
+
+### "<Common problem 1>"
+<Solution>
+
+### "<Common problem 2>"
+<Solution>
+
+## References
+- [Link 1](url)
+- [Link 2](url)
+```
+
+--------------------------------------------------------------------------------
+PHASE 7: Updating CLAUDE.md
+--------------------------------------------------------------------------------
+
+Update the CLAUDE.md file in the project root with:
+
+1. Updated directory structure (in "Key Components" section)
+2. Server marked as MIGRATED in "Targeted MCP Servers" list
+3. New skill in "Available Skills" section with quick usage example
+4. Link to documentation in "Additional Documentation" section
+
+================================================================================
+
+3.0 FINAL CHECKLIST
+
+Before considering the skill complete:
+
+[ ] client.ts created/updated with server configuration
+[ ] servers/<server-name>/ directory created
+[ ] Wrapper file created for EACH MCP server tool
+[ ] Each wrapper file has:
+    [ ] TypeScript interfaces for params and result
+    [ ] Exported function with complete JSDoc
+    [ ] SAFETY level documentation
+    [ ] At least one @example
+    [ ] Test block in __main__ (optional)
+[ ] index.ts with all exports organized by category
+[ ] .claude/skills/<name>-code-exec/SKILL.md with:
+    [ ] Frontmatter with name and description
+    [ ] Motivation and benefits
+    [ ] Tool structure
+    [ ] Workflow with code examples
+    [ ] Safety levels table
+    [ ] Best practices DO/DON'T
+    [ ] Troubleshooting
+[ ] CLAUDE.md updated with:
+    [ ] Directory structure
+    [ ] Server marked MIGRATED
+    [ ] Skill in dedicated section
+    [ ] Documentation link
+
+================================================================================
+
+4.0 COMPLETE EXAMPLE: SUPABASE-SELF-HOSTED
+
+Completed implementation reference:
+
+```
+BEYOND-MCP/
+├── client.ts                              # Main MCP Bridge
+├── servers/
+│   └── supabase-self-hosted/
+│       ├── index.ts                       # Organized exports
+│       ├── getSchemas.ts                  # LOW risk
+│       ├── getTables.ts                   # LOW risk
+│       ├── getTableSchema.ts              # LOW risk
+│       ├── executePostgresql.ts           # VARIABLE risk
+│       ├── retrieveMigrations.ts          # LOW risk
+│       ├── sendManagementApiRequest.ts    # VARIABLE risk
+│       ├── getManagementApiSpec.ts        # LOW risk
+│       ├── callAuthAdminMethod.ts         # VARIABLE risk
+│       ├── getAuthAdminMethodsSpec.ts     # LOW risk
+│       ├── retrieveLogs.ts                # LOW risk
+│       ├── liveDangerously.ts             # CONTROL tool
+│       └── confirmDestructiveOperation.ts # CONTROL tool
+└── .claude/
+    └── skills/
+        └── supabase-code-exec/
+            └── SKILL.md                   # Complete documentation
+```
+
+Total tools: 12
+Estimated implementation time: 30-60 minutes for average MCP server
+Expected token reduction: 95-99%
+
+================================================================================
+
+5.0 ALTERNATIVE APPROACH: DIRECT CONNECTION (WITHOUT MCP SERVER)
+
+For some services (e.g., PostgreSQL/Supabase database), it's possible to bypass
+the MCP server completely using a direct connection. This approach:
+
+ADVANTAGES:
+- No MCP server process overhead
+- No dependency on external MCP packages
+- Greater control and debugging
+- Further token reduction (~99%+)
+
+WHEN TO USE IT:
+- Databases: PostgreSQL, MySQL, MongoDB (native drivers available)
+- REST APIs: Direct HTTP calls
+- File system: Native Node.js operations
+- Services with well-documented official SDKs
+
+WHEN NOT TO USE IT:
+- Complex services where MCP handles authentication/sessions
+- When MCP server provides critical business logic
+- When compatibility with other MCP clients is important
+
+EXAMPLE: Direct PostgreSQL Connection (tested with local Supabase)
+
+```typescript
+// client-pg.ts - Direct connection without MCP
+import { Pool, QueryResultRow } from 'pg';
+
+let pool: Pool | null = null;
+
+function getPool(): Pool {
+  if (!pool) {
+    pool = new Pool({
+      connectionString: process.env.POSTGRES_URL_NON_POOLING ||
+        'postgresql://postgres:postgres@localhost:54322/postgres',
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    });
+  }
+  return pool;
+}
+
+export async function query<T extends QueryResultRow>(
+  sql: string,
+  params?: unknown[]
+): Promise<{ rows: T[]; rowCount: number | null }> {
+  const p = getPool();
+  const result = await p.query<T>(sql, params);
+  return { rows: result.rows, rowCount: result.rowCount };
+}
+
+export async function getSchemas() { /* ... */ }
+export async function getTables(schema: string) { /* ... */ }
+export async function executePostgresql(sql: string, allowWrite = false) { /* ... */ }
+export async function closePool() { /* ... */ }
+```
+
+REQUIRED DEPENDENCIES:
+```bash
+npm install pg @types/pg
+```
+
+================================================================================
+
+6.0 SELF-CONTAINED SKILL STRUCTURE (BEST PRACTICE)
+
+To make skills portable and zippable, follow this structure:
+
+```
+.claude/skills/<name>-code-exec/
+├── SKILL.md                    # Documentation with setup instructions
+└── scripts/                    # Skill source code
+    ├── client.ts               # Main client (MCP or Direct)
+    └── helpers.ts              # Optional utilities
+```
+
+ADVANTAGES:
+- Self-contained skill in a single folder
+- Portable: zip and copy to other projects
+- Clear separation between docs and code
+- Easy versioning and backup
+
+SKILL.md TEMPLATE for self-contained skill:
+
+```markdown
+---
+name: <name>-code-exec
+description: <Description for discovery. Use when you need to...>
+---
+
+# <Name> Code Execution
+
+<Brief pattern description>
+
+## Setup (one-time per project)
+
+1. Install dependencies:
+\`\`\`bash
+npm install <packages>
+\`\`\`
+
+2. Copy `scripts/<client>.ts` to the project
+
+3. Configure environment variable:
+\`\`\`bash
+export <VAR_NAME>="<value>"
+\`\`\`
+
+Default: `<default value>` (<context>)
+
+## Usage
+
+\`\`\`typescript
+import { func1, func2 } from './<client>.js';
+
+// Usage example
+const result = await func1();
+\`\`\`
+
+## Available Functions
+
+| Function | Description |
+|----------|-------------|
+| `func1()` | ... |
+| `func2(param)` | ... |
+
+## Recommended Patterns
+
+**Process locally, report summary:**
+\`\`\`typescript
+const data = await executeQuery('SELECT * FROM big_table;');
+const summary = data.rows.filter(r => r.active).length;
+console.log(\`\${summary} active records\`);
+// Only the summary goes into context, not all rows
+\`\`\`
+```
+
+================================================================================
+
+7.0 ES MODULES COMPATIBILITY NOTES
+
+IMPORTANT: If the project uses ES Modules (type: "module" in package.json),
+avoid the CommonJS pattern for inline tests.
+
+❌ AVOID (causes error in ES Modules):
+```typescript
+if (require.main === module) {
+  // Test code
+}
+```
+
+✅ ALTERNATIVE 1 - Separate test file:
+```typescript
+// test-<tool>.ts
+import { myTool } from './<tool>.js';
+
+async function runTests() {
+  console.log('Testing...');
+  const result = await myTool();
+  console.log(result);
+}
+
+runTests();
+```
+
+✅ ALTERNATIVE 2 - Import URL check (ES Modules):
+```typescript
+import { fileURLToPath } from 'url';
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // Test code - executed only if file is entry point
+}
+```
+
+✅ ALTERNATIVE 3 - No inline tests:
+Remove test blocks entirely from wrappers and use dedicated test files.
+
+================================================================================
+
+8.0 FINAL NOTES
+
+WHEN ADDING A NEW SERVER:
+
+1. DECIDE APPROACH:
+   - MCP Server: Follow PHASE 2-7 (with client.ts bridge)
+   - Direct Connection: Follow Section 5.0 (direct connection)
+
+2. Create directory:
+   - MCP: servers/<new-server>/ + .claude/skills/<name>-code-exec/
+   - Direct: only .claude/skills/<name>-code-exec/scripts/
+
+3. Implement and test
+4. Document in SKILL.md
+
+WHEN MODIFYING AN EXISTING SERVER:
+
+1. Add/modify files in servers/<server>/ or scripts/
+2. Update index.ts if present
+3. Update SKILL.md if necessary
+
+GUIDING PRINCIPLES:
+
+1. Progressive Disclosure: NEVER load more than necessary
+2. Type Safety: Always TypeScript interfaces for params/results
+3. Documentation First: Complete JSDoc before implementing
+4. Safety Awareness: Always document risk level
+5. Self-Contained: Portable skills with scripts/ folder
+6. ES Modules Ready: Avoid obsolete CommonJS patterns
+
+================================================================================
+
+APPENDIX A: Quick Template New Server (MCP Bridge)
+
+```bash
+# 1. Structure
+mkdir -p servers/<server>
+mkdir -p .claude/skills/<server>-code-exec
+
+# 2. Add to client.ts
+# MCP_SERVERS['<server>'] = { command: '...', args: [...] }
+
+# 3. For each tool: create servers/<server>/<toolName>.ts
+# 4. Create servers/<server>/index.ts
+# 5. Create .claude/skills/<server>-code-exec/SKILL.md
+# 6. Update CLAUDE.md
+```
+
+APPENDIX B: Quick Template Direct Connection Skill
+
+```bash
+# 1. Self-contained structure
+mkdir -p .claude/skills/<name>-code-exec/scripts
+
+# 2. Create direct client
+# .claude/skills/<name>-code-exec/scripts/client-<type>.ts
+
+# 3. Create SKILL.md with:
+#    - Setup instructions (npm install, env vars)
+#    - Import path from scripts/
+#    - Usage examples
+
+# 4. Test with separate file
+# test-<name>.ts in project root
+```
+
+APPENDIX C: Local Supabase Ports (Docker)
+
+| Service    | Port  |
+|------------|-------|
+| PostgreSQL | 54322 |
+| Kong API   | 54321 |
+| Studio     | 54323 |
+| Inbucket   | 54324 |
+
+Default connection string:
+postgresql://postgres:postgres@localhost:54322/postgres
+
+================================================================================

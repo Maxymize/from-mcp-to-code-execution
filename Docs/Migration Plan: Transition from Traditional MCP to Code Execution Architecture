@@ -1,0 +1,421 @@
+Migration Plan: Transition from Traditional MCP to Code Execution Architecture
+
+
+--------------------------------------------------------------------------------
+
+
+1.0 Introduction and Strategic Context
+
+This document defines the strategic roadmap for migrating AI agent architecture from the traditional Model Context Protocol (MCP) model to an advanced architecture based on code execution (Code Execution). This transition is a fundamental step to overcome the inherent limitations of the current approach, drastically improving efficiency, scalability, and overall capabilities of our agentic systems.
+
+The current MCP approach, while becoming an industry standard for connecting agents to external tools, presents two critical limitations at scale, as identified by Anthropic:
+
+1. Context window overload from tool definitions: The conventional pattern requires upfront loading of all available tool definitions into the model context. When an agent is connected to hundreds or thousands of tools, this can consume hundreds of thousands of tokens before the user request is even processed, increasing costs and latency.
+2. Token consumption from intermediate tool results: Every tool call result must pass through the model context to be used in the next call. A practical example is transferring a meeting transcription from Google Drive to Salesforce: the entire transcription, which can reach ~50,000 tokens, must flow twice through the context, first as output from gdrive.getDocument and then as input for salesforce.updateRecord. This process is not only inefficient but can exceed context window limits, causing workflow failure.
+
+The Code Execution architecture emerges as the strategic solution to these challenges. Instead of calling tools directly, the agent writes and executes code that interacts with MCP servers as if they were APIs. The benefits are immediate and significant: a token consumption reduction that can reach 98.7% (from 150,000 to just 2,000 tokens in complex scenarios), a substantial latency improvement, and enabling processing, persistence, and autonomy capabilities previously unattainable.
+
+This document will provide a detailed analysis of both architectures, a structured migration roadmap, and technical guidelines for successfully implementing this transformation.
+
+2.0 Comparative Architecture Analysis
+
+To fully appreciate the strategic logic of this migration, it is essential to understand the fundamental differences between traditional MCP architecture and the new code execution-based model. While both aim to connect agents to external systems, their approaches and implications are radically different.
+
+2.1 Traditional MCP Architecture
+
+The traditional model operates according to a client-server pattern. The MCP client, managed by the agent, loads all available tool definitions into the model context and orchestrates a message cycle. When the agent decides to use a tool, it formulates a call; the client executes it and inserts the result back into the context. Every single operation, including intermediate data, must pass through the model, making it the "brain" and the "bottleneck" of the entire process.
+
+2.2 Code Execution Architecture
+
+This new paradigm shifts operational logic from inside the model to a secure, isolated external execution environment (sandbox). The agent no longer "calls" tools but "writes and executes" code to interact with them. This approach is based on five fundamental pillars:
+
+* Progressive Disclosure: Tools are not loaded all upfront. They are represented as a file structure, for example servers/google-drive/getDocument.ts. The agent explores this filesystem "on-demand," reading and loading definitions only for the specific tools it needs for the current task, conserving precious context tokens.
+* Efficient Data Processing: Voluminous data is processed directly in the execution environment. For example, a spreadsheet with 10,000 rows can be filtered and aggregated by code written by the agent, which then passes only a synthetic result to the model (e.g., "Found 5 pending orders") instead of the entire dataset.
+* Advanced Control Flow: The agent can use native programming constructs such as loops, conditionals (if/else), and error handling (try/catch). This allows implementing complex logic, such as status polling or batch operations, in a single code execution, drastically reducing latency compared to dozens of sequential tool calls.
+* Privacy-Preserving Operations: Sensitive data can remain confined to the execution environment. The code can transfer data from one system to another (e.g., from a database to a CRM) without such information ever entering the model context. It is also possible to implement automatic tokenization of PII (Personally Identifiable Information) data, ensuring the model sees only anonymous placeholders.
+* State Persistence and "Skills": The agent can save intermediate results, artifacts, or the state of an operation in files within a working directory (./workspace/). More importantly, it can save the code it has written for a specific task as a reusable function in a ./skills/ directory. Over time, the agent builds a library of high-level "skills," evolving its capabilities and becoming more efficient in future tasks.
+
+2.3 Comparative Table
+
+The following table summarizes the main differences between the two approaches.
+
+Criterion	Traditional MCP	Code Execution
+Token Consumption	High; all definitions and intermediate results overload context.	Low; on-demand loading (progressive disclosure) and offline data processing.
+Latency	High; requires multiple round-trips to the model for complex logic (loops, conditionals).	Low; complex logic is executed in a single pass in the execution environment.
+Sensitive Data Handling	Risky; all data passes through the model context.	Secure; sensitive data remains in the execution environment and can be tokenized.
+Control Flow Complexity	Limited; requires chains of sequential tool calls.	High; natively supports loops, conditionals, and error handling.
+Scalability	Limited by the number of tools that can be loaded into context.	High; the number of tools is virtually unlimited thanks to progressive disclosure.
+Developer Experience	Limited; debugging happens via prompt chains. Standard tooling not applicable.	High; debuggable code, type safety with TypeScript, IDE support (autocomplete, refactoring).
+Pattern Maturity	Stable and standardized; widely adopted.	Emerging; evolving best practices, community-driven. No reference implementation.
+Infrastructure Complexity	Low; only requires an MCP client.	High; requires a secure execution environment (sandbox) with resource management.
+
+This comparative analysis clearly demonstrates the superiority of the Code Execution model for building scalable, efficient, and powerful agents. The next section will outline the practical plan to effect this transition.
+
+3.0 Strategic Migration Roadmap
+
+The transition to Code Execution architecture will be a gradual and structured process, designed to minimize risks, maximize value, and ensure a smooth transition. The roadmap is divided into seven distinct phases, with defined timelines to guide implementation.
+
+3.1 Phase 1: Assessment and Inventory (Week 1-2)
+
+* Key Objectives: Fully understand the existing MCP infrastructure, identify dependencies, and prioritize servers for migration.
+* Main Activities:
+  1. Create a complete inventory of all local and remote MCP servers currently in use.
+  2. For each server, document: exposed tools, usage frequency, criticality for business workflows, and dependencies.
+  3. Classify servers based on criticality and complexity to define migration order (start with a high-value, non-critical server).
+
+3.2 Phase 2: Sandbox Environment Configuration (Week 2-3)
+
+* Key Objectives: Set up a secure and isolated execution environment where agent-generated code can be executed.
+* Main Activities:
+  1. Evaluate and select a sandboxing solution. Consider options such as Docker containers, isolated VMs, or cloud-native services.
+  2. Explore the priority option: Option B: Claude Code built-in sandbox. Claude Code already includes a secure execution environment; verify that it is enabled and configured according to our policies.
+  3. Configure resource limits (CPU, memory, timeout) to prevent abuse.
+  4. Implement basic security policies (e.g., restricted filesystem and network access).
+
+3.3 Phase 3: Tool Filesystem Wrapper Generation (Week 3-4)
+
+* Key Objectives: Convert MCP tool definitions into a file and directory structure that the agent can explore.
+* Main Activities:
+  1. Use or adapt the following Python script to query existing MCP servers (via tools/list) and automatically generate the directory structure and TypeScript wrapper files.
+  2. Run the script for each target server and verify that each generated wrapper file contains the correct tool description, parameters, and a typed TypeScript interface.
+
+# script/generate_tool_wrappers.py
+import os
+import sys
+import json
+import subprocess
+from typing import Dict, Any
+
+def to_camel_case(snake_str: str) -> str:
+    components = snake_str.split('_')
+    return components[0] + ''.join(x.title() for x in components[1:])
+
+def generate_ts_interface(params: Dict[str, Any], name: str) -> str:
+    interface_str = f"interface {name} {{\n"
+    for param, details in params.items():
+        ts_type = "any"
+        if details['type'] == 'string':
+            ts_type = 'string'
+        elif details['type'] == 'number':
+            ts_type = 'number'
+        elif details['type'] == 'boolean':
+            ts_type = 'boolean'
+        elif details['type'] == 'object':
+            ts_type = 'object'
+
+        optional_marker = "" if details.get('required', False) else "?"
+        interface_str += f"  {param}{optional_marker}: {ts_type};\n"
+    interface_str += "}"
+    return interface_str
+
+def main(server_name: str, server_cmd: str):
+    print(f"Querying tools from server: {server_name}")
+
+    # Execute the MCP server and get the list of tools
+    process = subprocess.Popen(server_cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    # Simulate a `tools/list` request
+    request = json.dumps({"jsonrpc": "2.0", "method": "tools/list", "id": 1}) + "\n"
+
+    try:
+        stdout, stderr = process.communicate(input=request.encode(), timeout=15)
+        response = json.loads(stdout.decode())
+        tools = response['result']['tools']
+    except Exception as e:
+        print(f"Error communicating with MCP server: {e}", file=sys.stderr)
+        print(f"Stderr: {stderr.decode()}", file=sys.stderr)
+        return
+    finally:
+        process.kill()
+
+    # Create the server directory
+    server_dir = os.path.join("servers", server_name)
+    os.makedirs(server_dir, exist_ok=True)
+
+    # Generate wrapper files for each tool
+    for tool in tools:
+        tool_name = tool['name']
+        camel_case_name = to_camel_case(tool_name)
+
+        input_interface_name = f"{camel_case_name.title()}Input"
+        input_interface = generate_ts_interface(tool['parameters']['properties'], input_interface_name)
+
+        file_content = f"""
+// Auto-generated by generate_tool_wrappers.py
+import {{ callMCPTool }} from "../../../client.js";
+
+{input_interface}
+
+/*
+ * {tool['description']}
+ */
+export async function {camel_case_name}(input: {input_interface_name}): Promise<any> {{
+  return callMCPTool<any>('{server_name}__{tool_name}', input);
+}}
+"""
+        with open(os.path.join(server_dir, f"{camel_case_name}.ts"), "w") as f:
+            f.write(file_content.strip())
+
+    print(f"Generated {len(tools)} tool wrappers for {server_name} in {server_dir}")
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Usage: python generate_tool_wrappers.py <server_name> \"<server_command>\"")
+        sys.exit(1)
+
+    server_name = sys.argv[1]
+    server_command = sys.argv[2]
+    main(server_name, server_command)
+
+
+3.4 Phase 4: MCP Client Bridge Implementation (Week 4-5)
+
+* Key Objectives: Create the software component that connects code executed in the sandbox to the underlying MCP protocol.
+* Main Activities:
+  1. Develop the callMCPTool function that receives a tool name and its parameters from the agent's code.
+  2. Implement the logic to translate this call into a valid JSON-RPC 2.0 message and send it to the corresponding MCP server.
+  3. Handle the response from the server and return it to the executing code.
+
+3.5 Phase 5: Agent and Sub-agent Configuration (Week 5-6)
+
+* Key Objectives: Adapt agent prompting and configuration to leverage the new architecture.
+* Main Activities:
+  1. Create specialized agents for specific domains (e.g., Database Operations, Browser Automation).
+  2. Write system instructions (system prompt) that guide the agent to explore the tool filesystem, read necessary definitions, and write code to complete tasks.
+  3. Include the desired workflow in the prompt: first search for an existing "skill," otherwise compose code using base tools.
+
+3.6 Phase 6: Deployment and Gradual Rollout (Week 6-8)
+
+* Key Objectives: Deploy the new architecture in production in a controlled manner, carefully monitoring performance and stability.
+* Main Activities:
+  1. Week 6: Deployment in the development environment for non-critical workflows.
+  2. Week 7: Promotion to staging environment with intensive monitoring of performance and error rates.
+  3. Week 8: Production rollout, initially for 10% of traffic, gradually increasing the percentage as confidence in the system grows.
+
+3.7 Phase 7: Optimization and Documentation (Week 8+)
+
+* Key Objectives: Consolidate the benefits of the new architecture, promote reusability, and document best practices.
+* Main Activities:
+  1. Encourage development and saving of reusable "skills" for the most common code patterns.
+  2. Document the architecture, prompting best practices, and guidelines for creating new agents.
+  3. Analyze success metrics to quantify improvements and identify areas for further optimization.
+
+This roadmap provides a clear structure for a successful migration. The next section will delve into the technical details necessary for implementation.
+
+4.0 Technical Implementation Details
+
+This section provides technical details, code snippets, and essential best practices to guide the development team through the migration implementation phases.
+
+4.1 Server Inventory to Migrate
+
+The initial assessment (Phase 1) must catalog all MCP servers in use. Based on the provided inventory, here is the list of target servers with their canonical descriptions:
+
+* Local Servers (STDIO transport):
+  * openai-gpt-image-mcp - Image generation
+  * supabase-self-hosted - PostgreSQL Database
+  * react-icons - Icon library
+  * context17 - Context management
+  * magic-ui - UI components
+  * shadcn-vue-mcp - Vue UI framework
+  * playwright - Browser automation
+  * neon - PostgreSQL cloud
+* Remote/Plugin Servers (HTTP transport):
+  * plugin:neon-plugin:neon - Database operations
+  * sentry - Error monitoring
+  * netlify - Deployment platform
+  * stack-auth - Authentication
+
+4.2 MCP Client Bridge Implementation
+
+The Client Bridge is the heart of the system, a function that allows code executed by the agent to communicate with traditional MCP servers. The callMCPTool function serves as a bridge between the code world and the JSON-RPC protocol.
+
+// ./client.ts
+import { createJsonRpcRequest, sendJsonRpcRequest, parseJsonRpcResponse } from './rpc';
+
+/**
+ * Serves as a bridge between agent-executed code and the MCP protocol.
+ * Intercepts calls from agent code, formats them as JSON-RPC 2.0 requests
+ * and sends them to the correct MCP server, handling the response.
+ *
+ * @param fullToolName The full tool name, in the format 'server_name__tool_name'.
+ * @param params The parameters for the tool call.
+ * @returns A Promise that resolves with the tool call result.
+ */
+export async function callMCPTool<T>(fullToolName: string, params: object): Promise<T> {
+  const [serverName, toolName] = fullToolName.split('__');
+  if (!serverName || !toolName) {
+    throw new Error(`Invalid tool name format: ${fullToolName}. Expected 'server_name__tool_name'.`);
+  }
+
+  // Build the JSON-RPC request
+  const request = createJsonRpcRequest('tools/run', {
+    tool_name: toolName,
+    parameters: params,
+  });
+
+  // Send the request to the appropriate MCP server (routing logic is handled by sendJsonRpcRequest)
+  // This function must be implemented to handle communication (e.g., via stdout/stdin or HTTP)
+  const responsePayload = await sendJsonRpcRequest(serverName, request);
+
+  // Parse and validate the response
+  const response = parseJsonRpcResponse(responsePayload);
+
+  if (response.error) {
+    const { code, message } = response.error;
+    throw new Error(`MCP Error (${code}): ${message}`);
+  }
+
+  return response.result as T;
+}
+
+
+4.3 Specialized Agent Configuration
+
+The winning strategy is to create specialized agents, each with a set of instructions and best practices optimized for their domain.
+
+* Database Operations Agent (Supabase/Neon)
+  * Fundamental Principle: The model must never see raw data in bulk. The execution environment is the token firewall.
+  * Best Practices:
+    * Use batch operations (e.g., multiple INSERTs) to reduce the number of calls.
+    * Always wrap database operations in try/catch blocks to gracefully handle errors.
+    * Save complex intermediate results in temporary files in ./workspace/ for debugging and reuse.
+* Browser Automation Agent (Playwright)
+  * Fundamental Principle: Web navigation is inherently fragile; code must be robust and resilient.
+  * Best Practices:
+    * Always implement retry logic for network operations and element searches.
+    * Use robust and stable selectors (e.g., data-testid is preferable to fragile CSS or XPath selectors).
+    * Save screenshots in case of errors to facilitate debugging.
+    * Log progress at every significant step to trace execution.
+
+4.4 Developing Reusable "Skills"
+
+"Skills" represent the agent's ability to learn and improve over time. They are reusable functions that encapsulate common workflows, saved by the agent itself in the ./skills/ directory. This allows drastically reducing tokens and execution time for repetitive tasks.
+
+For example, after executing a Google Drive to Salesforce transfer for the first time, the agent can save the following code as a skill:
+
+// ./skills/google-drive-to-salesforce/implementation.ts
+import * as gdrive from '../../servers/google-drive';
+import * as salesforce from '../../servers/salesforce';
+
+interface SyncOptions {
+  documentId: string;
+  salesforceObject: string;
+  recordId: string;
+  field: string;
+  truncate?: number;
+}
+
+export async function syncDocToSalesforce(
+  options: SyncOptions
+): Promise<void> {
+  // 1. Retrieve the document from Google Drive
+  const doc = await gdrive.getDocument({ documentId: options.documentId });
+  let content = doc.content;
+
+  // 2. Process the content (e.g., truncate if necessary) in the execution environment
+  if (options.truncate && content.length > options.truncate) {
+    content = content.substring(0, options.truncate) + '...';
+  }
+
+  // 3. Update the record in Salesforce
+  // Complete data is transferred, but never enters the model context
+  await salesforce.updateRecord({
+    objectType: options.salesforceObject,
+    recordId: options.recordId,
+    data: { [options.field]: content },
+  });
+}
+
+
+The next time it needs to execute a similar task, the agent will find and directly use this skill, completing the operation in a single step. This mechanism is crucial for long-term system evolution and autonomy.
+
+5.0 Security Considerations
+
+Transitioning to AI model-generated code execution introduces a new set of security considerations that must be managed proactively and rigorously. Trust in the system depends on a robust and secure execution environment.
+
+5.1 Security Checklist
+
+The following controls are mandatory and must be implemented and verified before any production deployment:
+
+* [ ] Sandbox Limits: CPU, memory, and maximum execution time limits configured to prevent denial-of-service or infinite loops.
+* [ ] PII Tokenization: An automatic mechanism must be active to intercept and tokenize sensitive data before it is logged or inserted into the model context.
+* [ ] Restricted Filesystem Access: Write access must be strictly confined to the temporary working directory (/app/workspace). Read access must be limited to tool and skill files.
+* [ ] Network Whitelist: Network access from within the sandbox must be limited by a whitelist that allows connections only to approved MCP server endpoints.
+* [ ] Secure Environment Variables: Environment variables (e.g., API keys, credentials) must never be exposed in logs or directly accessible by agent code.
+* [ ] Execution Log Monitoring: Code execution logs must be actively monitored to detect anomalies or suspicious behavior.
+
+5.2 Risk Analysis and Trade-offs
+
+Despite the notable advantages, the Code Execution approach also carries risks and costs that must be carefully evaluated.
+
+* Increased Security Surface: Code execution introduces potential attack vectors (e.g., code injection, exploitation of vulnerabilities in generated code) that don't exist in the direct call model. This risk is mitigated by rigorous sandboxing.
+* Infrastructure Complexity: Managing a secure execution environment (e.g., a container cluster) involves greater operational overhead compared to simply managing an MCP client.
+* Implementation Costs: Adopting this pattern is not native and requires initial development effort to create wrappers, the client bridge, and agent configuration. It's an investment in a more scalable architecture.
+* Debugging Complexity: Diagnosing errors in AI-generated code can be more complex than debugging a chain of tool calls. It requires analyzing stack traces and potentially non-idiomatic code.
+
+Managing these trade-offs is fundamental to the project's long-term success, which we will now proceed to define how to measure.
+
+6.0 Success Metrics and Monitoring
+
+To objectively evaluate the success of the migration and monitor new system performance, it is essential to define quantitative metrics and clear Key Performance Indicators (KPIs). Continuous monitoring will ensure that expected benefits are realized and maintained over time.
+
+The main KPIs for this project are:
+
+* Token Consumption Reduction:
+  * Metric: Average percentage reduction of total tokens (input + output) for complex workflows.
+  * Objective: >95% reduction compared to traditional MCP architecture baseline.
+  * Tool: Framework-integrated tracing.
+* Latency Improvement:
+  * Metric: Reduction in "time to first token" and total completion time for tasks requiring conditional or iterative logic.
+  * Objective: Measurable improvement, with the goal of executing in a single code execution workflows that previously required dozens of iterations.
+  * Tool: Performance logs and tracing.
+* Error Rate:
+  * Metric: Percentage of code executions that terminate with an error.
+  * Objective: Overall error rate <5%.
+  * Tool: Continuous monitoring via Sentry.
+* Agent Capability Evolution:
+  * Metric: Number of reusable "Skills" created, saved, and successfully adopted by agents in subsequent tasks.
+  * Objective: Constant growth of the skill library, indicating system evolution and learning.
+  * Tool: Analysis of the ./skills/ filesystem.
+
+After deployment, an intensive monitoring plan will be activated. Sentry dashboards will be checked for new errors every 10 minutes for the first hour post-deploy. Automatic alerts will be configured to notify the team if the error rate exceeds 5% or critical errors are detected, triggering automatic rollback procedures if necessary.
+
+7.0 Troubleshooting Guide
+
+This section is a practical resource for the technical team, designed to quickly diagnose and resolve the most common problems that may emerge during and after the migration to Code Execution architecture.
+
+7.1 Quick Troubleshooting Matrix
+
+Symptom	Probable Cause	Quick Solution
+"Command not found"	Relative path or command not in sandbox PATH.	Always use absolute paths. Verify with which <command>.
+Immediate server crash	Non-JSON output on stdout. stdout is reserved for JSON-RPC messages.	Move all logs, prints, and debug messages to stderr.
+"Not connected" after startup	MCP protocol handshake failed.	Verify that protocol versions between client and server match. Check stderr logs.
+"Tenant not found" (Supabase)	Supabase project region incorrect.	Set the SUPABASE_REGION environment variable with the correct region.
+Authentication loop (Netlify)	OAuth session persistence issue.	Use a Personal Access Token (PAT) and pass it via environment variable.
+NPX fails (Windows+NVM)	NVM path resolution on Windows is unreliable.	Use the absolute path to node.exe.
+Works in CLI, fails in IDE	Environment variable or session isolation.	Restart the IDE. Verify that environment variables are properly propagated.
+SSL/certificate errors	Self-signed or expired certificate.	Verify certificate validity. Use NODE_TLS_REJECT_UNAUTHORIZED=0 only for development.
+
+7.2 Common Problems and Solutions
+
+* Connection errors ("Command not found"):
+  * Cause: The execution environment (sandbox) has a limited PATH. Commands that work in a developer's shell might not be found.
+  * Solution: Always use absolute paths for executables in server configuration.
+* Authentication errors (Supabase, Sentry, Netlify):
+  * Cause: Credentials (tokens, API keys) are not available or are incorrect within the sandbox environment.
+  * Solution: Ensure credentials are securely passed as environment variables to the sandbox and that their values are correct and have the necessary permissions. For services like Netlify, using Personal Access Tokens (PAT) is often more stable than interactive OAuth.
+* Invalid output on stdout:
+  * Cause: This is one of the most common and difficult-to-diagnose error causes. Any output on stdout that is not a valid JSON-RPC 2.0 message will interrupt communication.
+  * Solution: Perform a rigorous code review of the MCP server to ensure all console.log, print, and other debug output is directed to stderr.
+
+A methodical approach to debugging, starting from the troubleshooting matrix, will allow resolving most problems efficiently.
+
+8.0 Conclusion and Next Steps
+
+The migration to Code Execution architecture represents a fundamental strategic evolution for our AI agent systems. This change transforms MCP from a simple call protocol to a code-first system that fully leverages the capability of modern LLMs to write code, unlocking a new level of efficiency, intelligence, and autonomy.
+
+The key benefits of this transition are unequivocal and quantifiable: drastic savings on operational costs thanks to token consumption reduction, significant latency decrease for complex workflows, greater security in handling sensitive data, and above all, the capability for agents to evolve and learn. This approach promotes a code-first system that unlocks true autonomy, allowing agents to evolve organically through the creation and persistence of reusable "skills."
+
+This document has provided the strategic vision, comparative analysis, detailed roadmap, and technical guidelines to successfully embark on this path.
+
+The next operational step is the formal start of Phase 1: Assessment and Inventory, as outlined in the roadmap. The project team will proceed with cataloging and prioritizing existing MCP servers to begin this transformative initiative.
