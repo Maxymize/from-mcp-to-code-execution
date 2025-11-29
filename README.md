@@ -134,15 +134,23 @@ Create a Code Execution skill for @anthropic/mcp-server-github
 ```
 .claude/
 ├── agents/
-│   └── mcp-to-code-execution    # Autonomous conversion agent
+│   └── mcp-to-code-execution     # Autonomous conversion agent
 └── skills/
-    ├── code-execution-creator/  # Skill creation guide & templates
-    ├── supabase-code-exec/      # Example: PostgreSQL direct connection
-    ├── magic-ui-code-exec/      # Example: REST API direct fetch
-    └── shadcn-vue-code-exec/    # Example: Hybrid (Code Exec + MCP)
+    ├── code-execution-creator/   # Skill creation guide & templates
+    ├── supabase-code-exec/       # PostgreSQL direct connection
+    ├── magic-ui-code-exec/       # REST API direct fetch
+    ├── stack-auth-code-exec/     # Documentation API (110+ docs)
+    └── shadcn-vue-code-exec/     # Hybrid (Code Exec + MCP)
 ```
 
-## Included Examples
+## Included Skills
+
+| Skill | Strategy | Token Reduction | MCP Required |
+|-------|----------|-----------------|--------------|
+| [supabase-code-exec](#supabase-100-migrated) | Direct Connection | 99%+ | No |
+| [magic-ui-code-exec](#magic-ui-100-migrated) | Direct Connection | 99%+ | No |
+| [stack-auth-code-exec](#stack-auth-100-migrated) | Direct Connection | 99%+ | No |
+| [shadcn-vue-code-exec](#shadcn-vue-hybrid) | Hybrid | ~80% | Yes |
 
 ### Supabase (100% Migrated)
 
@@ -173,6 +181,29 @@ const buttons = searchComponents('button');
 
 **Token reduction**: 99%+
 **MCP required**: No
+
+### Stack Auth (100% Migrated)
+
+Access Stack Auth documentation with instant local search and on-demand fetching.
+
+```typescript
+import {
+  listDocs, searchDocs, getDocById, getSetupInstructions,
+  listCategories, listDocsByCategory, getQuickReference
+} from './client-stack-auth.js';
+
+// Instant local search (no network)
+const results = searchDocs('oauth google');
+const categories = listCategories();
+
+// Fetch only what you need (network)
+const doc = await getDocById('/docs/getting-started/setup');
+const setup = await getSetupInstructions();
+```
+
+**Token reduction**: 99%+
+**MCP required**: No
+**Coverage**: 110+ documentation pages, 13 categories
 
 ### shadcn-vue (Hybrid)
 

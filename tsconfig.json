@@ -15,7 +15,8 @@
   "include": [
     "client.ts",
     "servers/**/*.ts",
-    ".claude/skills/**/*.ts"
+    ".claude/skills/**/*.ts",
+    "test/**/*.ts"
   ],
   "exclude": [
     "node_modules",
