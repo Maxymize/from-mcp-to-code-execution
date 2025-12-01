@@ -140,6 +140,7 @@ Create a Code Execution skill for @anthropic/mcp-server-github
     ├── supabase-code-exec/       # PostgreSQL direct connection
     ├── magic-ui-code-exec/       # REST API direct fetch
     ├── stack-auth-code-exec/     # Documentation API (110+ docs)
+    ├── stripe-code-exec/         # Payments API with sandbox support
     └── shadcn-vue-code-exec/     # Hybrid (Code Exec + MCP)
 ```
 
@@ -150,6 +151,7 @@ Create a Code Execution skill for @anthropic/mcp-server-github
 | [supabase-code-exec](#supabase-100-migrated) | Direct Connection | 99%+ | No |
 | [magic-ui-code-exec](#magic-ui-100-migrated) | Direct Connection | 99%+ | No |
 | [stack-auth-code-exec](#stack-auth-100-migrated) | Direct Connection | 99%+ | No |
+| [stripe-code-exec](#stripe-100-migrated) | Direct Connection | 99%+ | No |
 | [shadcn-vue-code-exec](#shadcn-vue-hybrid) | Hybrid | ~80% | Yes |
 
 ### Supabase (100% Migrated)
@@ -204,6 +206,36 @@ const setup = await getSetupInstructions();
 **Token reduction**: 99%+
 **MCP required**: No
 **Coverage**: 110+ documentation pages, 13 categories
+
+### Stripe (100% Migrated)
+
+Full Stripe API access with Test Mode (sandbox) and Live Mode support.
+
+```typescript
+import {
+  createCustomer, createPaymentIntent, confirmPaymentIntent,
+  createSubscription, listProducts, createRefund,
+  isTestMode, getTestCard, getSandboxSetupGuide,
+  TEST_CARDS, TEST_PAYMENT_METHODS
+} from './client-stripe.js';
+
+// Check mode before operations
+if (isTestMode(process.env.STRIPE_API_KEY)) {
+  console.log('Safe to test!');
+}
+
+// Use test cards in sandbox
+const card = getTestCard('visa'); // 4242424242424242
+
+// Full payment flow
+const customer = await createCustomer({ email: 'test@example.com' });
+const intent = await createPaymentIntent({ amount: 2000, currency: 'usd' });
+await confirmPaymentIntent(intent.id, { payment_method: 'pm_card_visa' });
+```
+
+**Token reduction**: 99%+
+**MCP required**: No
+**Coverage**: 22+ MCP tools, 60+ API functions, 46 test card scenarios
 
 ### shadcn-vue (Hybrid)
 
