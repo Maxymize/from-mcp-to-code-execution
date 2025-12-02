@@ -141,6 +141,7 @@ Create a Code Execution skill for @anthropic/mcp-server-github
     ├── magic-ui-code-exec/       # REST API direct fetch
     ├── stack-auth-code-exec/     # Documentation API (110+ docs)
     ├── stripe-code-exec/         # Payments API with sandbox support
+    ├── neon-code-exec/           # Serverless Postgres API
     └── shadcn-vue-code-exec/     # Hybrid (Code Exec + MCP)
 ```
 
@@ -152,6 +153,7 @@ Create a Code Execution skill for @anthropic/mcp-server-github
 | [magic-ui-code-exec](#magic-ui-100-migrated) | Direct Connection | 99%+ | No |
 | [stack-auth-code-exec](#stack-auth-100-migrated) | Direct Connection | 99%+ | No |
 | [stripe-code-exec](#stripe-100-migrated) | Direct Connection | 99%+ | No |
+| [neon-code-exec](#neon-100-migrated) | Direct Connection | 99%+ | No |
 | [shadcn-vue-code-exec](#shadcn-vue-hybrid) | Hybrid | ~80% | Yes |
 
 ### Supabase (100% Migrated)
@@ -236,6 +238,50 @@ await confirmPaymentIntent(intent.id, { payment_method: 'pm_card_visa' });
 **Token reduction**: 99%+
 **MCP required**: No
 **Coverage**: 22+ MCP tools, 60+ API functions, 46 test card scenarios
+
+### Neon (100% Migrated)
+
+Full Neon Serverless Postgres API access for project management, branching, and SQL execution.
+
+```typescript
+import {
+  listProjects, createProject, createBranch, deleteBranch,
+  runSql, runSqlTransaction, explainSql,
+  getTables, getTableSchema, listSlowQueries,
+  getConnectionString, listRegions,
+} from './client-neon.js';
+
+// List your projects
+const { projects } = await listProjects();
+console.log('Projects:', projects.map(p => p.name));
+
+// Create a new project
+const result = await createProject({
+  name: 'my-app',
+  region_id: 'aws-us-east-1',
+  pg_version: 16
+});
+
+// Execute SQL queries
+const users = await runSql({
+  projectId: result.project.id,
+  sql: 'SELECT * FROM users LIMIT 10'
+});
+
+// Branch-based development (Neon's killer feature)
+const devBranch = await createBranch(result.project.id, {
+  name: 'feature/new-schema'
+});
+await runSql({
+  projectId: result.project.id,
+  branchId: devBranch.branch.id,
+  sql: 'ALTER TABLE users ADD COLUMN preferences JSONB'
+});
+```
+
+**Token reduction**: 99%+
+**MCP required**: No
+**Coverage**: 27 MCP tools, 50+ API functions, branch management, SQL execution
 
 ### shadcn-vue (Hybrid)
 
