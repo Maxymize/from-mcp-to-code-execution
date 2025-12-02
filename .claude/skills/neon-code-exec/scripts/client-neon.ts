@@ -596,6 +596,136 @@ export function getErrorReference(): Record<string, string> {
 }
 
 // ============================================================================
+// API Key Validation with User Guidance
+// ============================================================================
+
+export interface ApiKeyCheckResult {
+  found: boolean;
+  valid: boolean;
+  message: string;
+  instructions?: string;
+}
+
+/**
+ * Check for API key and provide user guidance if not found.
+ * Call this function at the start of any Neon operation to ensure
+ * the user has configured their API key correctly.
+ *
+ * @returns ApiKeyCheckResult with status and instructions
+ */
+export function checkApiKeyWithGuidance(): ApiKeyCheckResult {
+  const apiKey = getDefaultApiKey();
+
+  if (!apiKey) {
+    return {
+      found: false,
+      valid: false,
+      message: '⚠️ NEON_API_KEY not found in environment variables',
+      instructions: `
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                        NEON API KEY REQUIRED                                  ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║  To use the Neon Code Execution skill, you need to set up your API key.     ║
+║                                                                              ║
+║  HOW TO GET YOUR API KEY:                                                    ║
+║  ─────────────────────────                                                   ║
+║  1. Go to https://console.neon.tech                                         ║
+║  2. Click on your profile icon (top-right corner)                           ║
+║  3. Select "Account Settings"                                               ║
+║  4. Navigate to "API keys" section                                          ║
+║  5. Click "Create new API key"                                              ║
+║  6. Copy the generated key (you won't be able to see it again!)             ║
+║                                                                              ║
+║  HOW TO SET THE ENVIRONMENT VARIABLE:                                        ║
+║  ────────────────────────────────────                                        ║
+║                                                                              ║
+║  Option 1: Export in terminal (temporary, for current session)              ║
+║  ┌──────────────────────────────────────────────────────────────┐           ║
+║  │ export NEON_API_KEY="your-api-key-here"                      │           ║
+║  └──────────────────────────────────────────────────────────────┘           ║
+║                                                                              ║
+║  Option 2: Add to .env file (persistent, recommended)                       ║
+║  ┌──────────────────────────────────────────────────────────────┐           ║
+║  │ NEON_API_KEY=your-api-key-here                               │           ║
+║  └──────────────────────────────────────────────────────────────┘           ║
+║                                                                              ║
+║  Then reload your environment:                                               ║
+║  - If using .env: run 'source .env' or restart your terminal                ║
+║  - If using VS Code: restart the integrated terminal                        ║
+║                                                                              ║
+║  Please confirm you have set up the API key before proceeding.              ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+`
+    };
+  }
+
+  // Validate format
+  const validation = validateApiKey(apiKey);
+  if (!validation.valid) {
+    return {
+      found: true,
+      valid: false,
+      message: `⚠️ API key found but appears invalid: ${validation.message}`,
+      instructions: `
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                      INVALID NEON API KEY FORMAT                              ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║  Your NEON_API_KEY appears to be invalid: ${validation.message?.padEnd(30)}  ║
+║                                                                              ║
+║  Please verify your API key:                                                 ║
+║  1. Go to https://console.neon.tech → Account Settings → API keys           ║
+║  2. Create a new API key if needed                                          ║
+║  3. Update your environment variable with the correct key                   ║
+║                                                                              ║
+║  Example (in .env file):                                                     ║
+║  ┌──────────────────────────────────────────────────────────────┐           ║
+║  │ NEON_API_KEY=your-correct-api-key-here                       │           ║
+║  └──────────────────────────────────────────────────────────────┘           ║
+║                                                                              ║
+║  Please confirm you have corrected the API key before proceeding.           ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+`
+    };
+  }
+
+  return {
+    found: true,
+    valid: true,
+    message: '✅ NEON_API_KEY found and valid'
+  };
+}
+
+/**
+ * Ensure API key is available before proceeding.
+ * Throws an error with detailed instructions if not found.
+ */
+export function ensureApiKey(): void {
+  const check = checkApiKeyWithGuidance();
+  if (!check.valid) {
+    console.log(check.instructions);
+    throw new Error(check.message);
+  }
+}
+
+/**
+ * Get a formatted message for requesting user confirmation after API key setup.
+ */
+export function getApiKeyConfirmationPrompt(): string {
+  return `
+Have you set up your NEON_API_KEY environment variable?
+
+Please confirm by typing:
+- "yes" or "done" if you have set up the API key
+- "help" if you need the instructions again
+- "cancel" to abort the operation
+`;
+}
+
+// ============================================================================
 // Core API Request Function
 // ============================================================================
 

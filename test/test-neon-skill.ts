@@ -26,6 +26,9 @@ import {
   formatComputeUnits,
   getGettingStartedGuide,
   getErrorReference,
+  checkApiKeyWithGuidance,
+  ensureApiKey,
+  getApiKeyConfirmationPrompt,
   NEON_REGIONS,
   // API functions
   listProjects,
@@ -100,6 +103,37 @@ async function runLocalTests() {
   await test('validateApiKey - short key', 'Local', () => {
     const result = validateApiKey('short');
     return result.valid === false && result.message === 'API key appears too short';
+  });
+
+  // Test checkApiKeyWithGuidance
+  await test('checkApiKeyWithGuidance - returns result object', 'Local', () => {
+    const result = checkApiKeyWithGuidance();
+    return typeof result.found === 'boolean' &&
+           typeof result.valid === 'boolean' &&
+           typeof result.message === 'string';
+  });
+
+  await test('checkApiKeyWithGuidance - provides instructions when missing', 'Local', () => {
+    // Save current key
+    const originalKey = process.env.NEON_API_KEY;
+    delete process.env.NEON_API_KEY;
+
+    const result = checkApiKeyWithGuidance();
+
+    // Restore key
+    if (originalKey) process.env.NEON_API_KEY = originalKey;
+
+    return result.found === false &&
+           result.instructions !== undefined &&
+           result.instructions.includes('NEON API KEY REQUIRED');
+  });
+
+  // Test getApiKeyConfirmationPrompt
+  await test('getApiKeyConfirmationPrompt - returns prompt string', 'Local', () => {
+    const prompt = getApiKeyConfirmationPrompt();
+    return typeof prompt === 'string' &&
+           prompt.includes('NEON_API_KEY') &&
+           prompt.includes('confirm');
   });
 
   // Test hasApiKey

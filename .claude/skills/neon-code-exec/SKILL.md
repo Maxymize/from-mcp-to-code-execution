@@ -11,6 +11,28 @@ Reduces token usage by 99%+ following Anthropic's Code Execution pattern.
 **Strategy**: Direct Connection (100% MIGRATED)
 **Result**: User CAN uninstall Neon MCP server
 
+## IMPORTANT: First Invocation - API Key Check
+
+**Before executing ANY Neon operation**, Claude MUST check for the API key:
+
+```typescript
+import { checkApiKeyWithGuidance } from './client-neon.js';
+
+// Check API key FIRST before any operation
+const apiKeyCheck = checkApiKeyWithGuidance();
+
+if (!apiKeyCheck.valid) {
+  // Show instructions to user
+  console.log(apiKeyCheck.instructions);
+  // ASK USER TO CONFIRM they have set the API key before proceeding
+}
+```
+
+If the API key is not found or invalid:
+1. Display the instructions from `apiKeyCheck.instructions`
+2. **Ask the user to confirm** they have set up the API key before proceeding
+3. Do NOT execute any Neon operations until user confirms
+
 ## Setup
 
 ### 1. Get Your API Key
@@ -182,6 +204,9 @@ console.log('Dev branch:', branch.branch.id);
 
 | Function | Description |
 |----------|-------------|
+| `checkApiKeyWithGuidance()` | **CALL FIRST** - Check API key and get setup instructions if missing |
+| `ensureApiKey()` | Throws with instructions if API key missing |
+| `getApiKeyConfirmationPrompt()` | Get prompt text for user confirmation |
 | `validateApiKey(key)` | Validate API key format |
 | `getDefaultApiKey()` | Get API key from environment |
 | `hasApiKey()` | Check if API key is set |
