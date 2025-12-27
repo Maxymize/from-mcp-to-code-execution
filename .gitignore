@@ -9,8 +9,11 @@ node_modules/
 # Build output
 dist/
 
-# Test output (generated files)
-test/output/
+# Test files and scripts (not needed for skill users)
+test/
+servers/
+client.ts
+tsconfig.json
 
 # OS files
 .DS_Store
@@ -28,3 +31,12 @@ npm-debug.log*
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Keep only skills, commands, and documentation
+# Everything else is excluded unless explicitly tracked
