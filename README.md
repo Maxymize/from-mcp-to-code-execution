@@ -142,6 +142,8 @@ Create a Code Execution skill for @anthropic/mcp-server-github
     ├── stack-auth-code-exec/     # Documentation API (110+ docs)
     ├── stripe-code-exec/         # Payments API with sandbox support
     ├── neon-code-exec/           # Serverless Postgres API
+    ├── posthog-code-exec/        # Analytics & Feature Flags API (42 tools)
+    ├── sentry-code-exec/         # Error Tracking & Monitoring API
     └── shadcn-vue-code-exec/     # Hybrid (Code Exec + MCP)
 ```
 
@@ -154,7 +156,11 @@ Create a Code Execution skill for @anthropic/mcp-server-github
 | [stack-auth-code-exec](#stack-auth-100-migrated) | Direct Connection | 99%+ | No |
 | [stripe-code-exec](#stripe-100-migrated) | Direct Connection | 99%+ | No |
 | [neon-code-exec](#neon-100-migrated) | Direct Connection | 99%+ | No |
+| [posthog-code-exec](#posthog-100-migrated) | Direct Connection | 99%+ | No |
+| [sentry-code-exec](#sentry-100-migrated) | Direct Connection | 99%+ | No* |
 | [shadcn-vue-code-exec](#shadcn-vue-hybrid) | Hybrid | ~80% | Yes |
+
+*Note: Sentry's AI-powered search and Seer features require the MCP server. All standard REST API operations are fully migrated.
 
 ### Supabase (100% Migrated)
 
@@ -282,6 +288,135 @@ await runSql({
 **Token reduction**: 99%+
 **MCP required**: No
 **Coverage**: 27 MCP tools, 50+ API functions, branch management, SQL execution
+
+### PostHog (100% Migrated)
+
+Full PostHog API access for analytics, feature flags, experiments, error tracking, and more.
+
+```typescript
+import {
+  createPostHogClient,
+  getPostHogConfigFromEnv
+} from './client-posthog.js';
+
+// Initialize client
+const posthog = createPostHogClient(getPostHogConfigFromEnv());
+
+// Feature Flags
+const { results: flags } = await posthog.getFeatureFlags();
+await posthog.createFeatureFlag({
+  key: 'new-feature',
+  name: 'New Feature',
+  active: true,
+  rollout_percentage: 50
+});
+
+// Analytics & Insights
+const { results: insights } = await posthog.getInsights({ limit: 20 });
+const result = await posthog.runQuery({
+  query: {
+    kind: 'HogQLQuery',
+    query: 'SELECT properties.$current_url, count() FROM events GROUP BY properties.$current_url'
+  }
+});
+
+// Error Tracking
+const { results: errors } = await posthog.listErrors({ status: 'active' });
+const errorDetails = await posthog.getErrorDetails(errorId);
+
+// Experiments
+await posthog.createExperiment({
+  name: 'Button Color Test',
+  feature_flag_key: 'button-color',
+  metrics: [{ type: 'primary', query: { kind: 'TrendsQuery' } }]
+});
+
+// Surveys
+await posthog.createSurvey({
+  name: 'Product Feedback',
+  type: 'popover',
+  questions: [
+    { type: 'rating', question: 'How satisfied are you?' },
+    { type: 'open', question: 'What could we improve?' }
+  ]
+});
+```
+
+**Token reduction**: 99%+
+**MCP required**: No
+**Coverage**: 42 MCP tools covering all PostHog features (dashboards, feature flags, experiments, insights, error tracking, surveys, organization management)
+
+### Sentry (100% Migrated*)
+
+Full Sentry API access for error tracking, issue management, releases, and monitoring.
+
+```typescript
+import {
+  createSentryClient,
+  getSentryConfigFromEnv
+} from './client-sentry.js';
+
+// Initialize client
+const sentry = createSentryClient(getSentryConfigFromEnv());
+
+// List unresolved errors
+const issues = await sentry.listIssues({
+  query: 'is:unresolved level:error',
+  statsPeriod: '24h',
+  sort: 'freq'
+});
+
+issues.forEach(issue => {
+  console.log(`${issue.title} - ${issue.count} occurrences`);
+  console.log(`Users affected: ${issue.userCount}`);
+  console.log(issue.permalink);
+});
+
+// Get issue details
+const issue = await sentry.getIssue('12345');
+console.log(`Culprit: ${issue.culprit}`);
+
+// Update issue status
+await sentry.updateIssue('12345', { status: 'resolved' });
+
+// Bulk operations
+await sentry.bulkUpdateIssues(
+  ['12345', '12346', '12347'],
+  { status: 'resolved' }
+);
+
+// Releases
+const release = await sentry.createRelease({
+  version: '1.2.3',
+  projects: ['my-project'],
+  commits: [
+    { id: 'abc123', message: 'Fix critical bug' }
+  ]
+});
+
+// Projects & Teams
+const projects = await sentry.listProjects();
+const teams = await sentry.listTeams();
+
+// DSN Management
+const keys = await sentry.listProjectKeys('my-project');
+const newKey = await sentry.createProjectKey('my-project', {
+  name: 'Production Key'
+});
+
+// Statistics
+const stats = await sentry.getOrganizationStats({
+  stat: 'received',
+  since: Date.now() / 1000 - 86400,  // Last 24h
+  resolution: '1h'
+});
+```
+
+**Token reduction**: 99%+
+**MCP required**: No* (AI search and Seer require MCP)
+**Coverage**: Organizations, projects, teams, issues, events, releases, DSNs, statistics
+
+*Note: AI-powered search (`search_events`, `search_issues`) and Seer integration require the MCP server with OpenAI API key. All standard REST API operations are fully migrated for maximum efficiency.
 
 ### shadcn-vue (Hybrid)
 

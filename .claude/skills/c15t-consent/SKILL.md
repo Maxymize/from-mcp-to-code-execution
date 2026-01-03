@@ -9,6 +9,181 @@ description: Implement GDPR/CCPA-compliant consent management with c15t. Use whe
 
 c15t is an open-source consent management system for building GDPR, CCPA, and other privacy regulation compliant applications. It provides cookie banners, consent dialogs, script loading based on consent, and backend storage for consent records.
 
+## 🚨 Critical Implementation Patterns
+
+**THESE PATTERNS ARE MANDATORY - Follow them to avoid common errors**
+
+### 1. Next.js 15 App Router: Server/Client Separation
+
+**❌ WRONG - Will cause "headers() called outside request scope" error:**
+```tsx
+// DON'T: Put everything in a 'use client' component
+'use client';
+import { ConsentManagerProvider } from '@c15t/nextjs';
+
+export function ConsentProvider({ children }) {
+  return (
+    <ConsentManagerProvider options={{ mode: 'c15t', backendURL: '/api/c15t' }}>
+      {/* callbacks here */}
+      {children}
+    </ConsentManagerProvider>
+  );
+}
+```
+
+**✅ CORRECT - Separate server and client concerns:**
+```tsx
+// ConsentProvider.tsx (SERVER component - no 'use client')
+import { ConsentManagerProvider } from '@c15t/nextjs';
+
+export function ConsentProvider({ children }) {
+  return (
+    <ConsentManagerProvider
+      options={{
+        mode: 'c15t',
+        backendURL: '/api/c15t',
+        consentCategories: ['necessary', 'functionality', 'measurement', 'marketing'],
+        ignoreGeoLocation: process.env.NODE_ENV === 'development',
+        legalLinks: {
+          privacyPolicy: { href: '/privacy', label: 'Privacy Policy' },
+          cookiePolicy: { href: '/cookies', label: 'Cookie Policy' }
+        }
+      }}
+    >
+      {children}
+    </ConsentManagerProvider>
+  );
+}
+
+// ConsentManagerClient.tsx (CLIENT component for callbacks/scripts)
+'use client';
+import { ClientSideOptionsProvider } from '@c15t/nextjs/client';
+
+export function ConsentManagerClient({ children }) {
+  return (
+    <ClientSideOptionsProvider
+      callbacks={{
+        onBannerFetched(response) {
+          console.log('Banner fetched', response);
+        },
+        onConsentSet(response) {
+          console.log('Consent set', response);
+        },
+        onError(error) {
+          console.error('c15t error', error);
+        }
+      }}
+    >
+      {children}
+    </ClientSideOptionsProvider>
+  );
+}
+
+// app/layout.tsx
+import { ConsentProvider } from '@/components/consent/ConsentProvider';
+import { ConsentManagerClient } from '@/components/consent/ConsentManagerClient';
+import { CookieBanner } from '@/components/consent/CookieBanner';
+
+export default function Layout({ children }) {
+  return (
+    <ConsentProvider>
+      <ConsentManagerClient>
+        <CookieBanner />
+        {children}
+      </ConsentManagerClient>
+    </ConsentProvider>
+  );
+}
+```
+
+**Why this matters:**
+- `ConsentManagerProvider` needs to run server-side to access Next.js APIs like `headers()`
+- Callbacks and scripts must be client-side (cannot be serialized)
+- Mixing them causes runtime errors in Next.js 15
+
+### 2. Database Adapter: Use Kysely, NOT Drizzle
+
+**❌ WRONG - Drizzle causes "query mode" errors:**
+```tsx
+import { drizzleAdapter } from '@c15t/backend/v2/db/adapters/drizzle';
+import { drizzle } from 'drizzle-orm/postgres-js';
+
+const db = drizzle(queryClient); // Missing query mode config
+export const c15t = c15tInstance({
+  adapter: drizzleAdapter({ db, provider: 'postgresql' }) // WILL FAIL
+});
+```
+
+**✅ CORRECT - Use Kysely adapter (officially documented):**
+```tsx
+import { kyselyAdapter } from '@c15t/backend/v2/db/adapters/kysely';
+import { Kysely, PostgresDialect } from 'kysely';
+import { Pool } from 'pg';
+
+export const c15t = c15tInstance({
+  adapter: kyselyAdapter({
+    db: new Kysely({
+      dialect: new PostgresDialect({
+        pool: new Pool({
+          connectionString: process.env.DATABASE_URL
+        })
+      })
+    }),
+    provider: 'postgresql'
+  })
+});
+```
+
+**Why this matters:**
+- ALL c15t documentation examples use Kysely
+- Drizzle adapter exists but requires undocumented "query mode" configuration
+- Kysely is the officially supported and tested adapter
+- Using Kysely prevents "[fumadb] Drizzle adapter requires query mode" errors
+
+**Required packages:**
+```bash
+npm install kysely pg
+```
+
+### 3. Component Architecture Pattern
+
+**Required file structure:**
+```
+src/components/consent/
+├── ConsentProvider.tsx          # Server component (options)
+├── ConsentManagerClient.tsx     # Client component (callbacks/scripts)
+├── ConsentMonitor.tsx           # Client component (GA4 integration)
+├── CookieBanner.tsx             # Client component (UI)
+└── GoogleAnalytics.tsx          # Client component (GA script)
+```
+
+**Integration order in layout.tsx:**
+```tsx
+<ConsentProvider>              {/* Server: base configuration */}
+  <ConsentManagerClient>       {/* Client: callbacks, scripts */}
+    <CookieBanner />          {/* Client: UI component */}
+    {children}
+  </ConsentManagerClient>
+</ConsentProvider>
+```
+
+### 4. Database Migration
+
+**Always run migrations BEFORE using c15t backend:**
+```bash
+npx tsx scripts/migrate-c15t.ts
+```
+
+**Migration creates:**
+- `c15t_consent_records` - Main consent storage
+- `c15t_consent_preferences` - Category-level tracking
+- 5 optimized indexes
+
+**Check existing implementation in project:**
+- Migration script: `scripts/migrate-c15t.ts`
+- Uses Neon serverless SQL client
+- Safe to run multiple times (uses `IF NOT EXISTS`)
+
 ## Workflow Decision Tree
 
 ```
@@ -233,54 +408,75 @@ No backend needed. Good for simple sites, portfolios, blogs.
 
 **ASK USER: "Which database do you want to use for consent storage?"**
 
-| Database | Skill/Tool to Use | Free Tier |
-|----------|-------------------|-----------|
-| **Neon** | `neon-code-exec` skill | 0.5GB |
-| **Supabase** | `supabase-code-exec` skill | 500MB |
-| **Other PostgreSQL** | Drizzle/Kysely adapter | - |
-| **MySQL** | Kysely adapter | - |
-| **MongoDB** | MongoDB adapter | Atlas 512MB |
+| Database | Adapter to Use | Skill/Tool | Free Tier |
+|----------|----------------|------------|-----------|
+| **Neon** | **Kysely** ✅ | `neon-code-exec` skill | 0.5GB |
+| **Supabase** | **Kysely** ✅ | `supabase-code-exec` skill | 500MB |
+| **Other PostgreSQL** | **Kysely** ✅ | Manual | - |
+| **MySQL** | Kysely | Manual | - |
+| **MongoDB** | MongoDB | Manual | Atlas 512MB |
+
+**⚠️ IMPORTANT: Use Kysely adapter, NOT Drizzle** (see Critical Implementation Patterns above)
 
 #### Neon (Recommended for Next.js)
 
 1. **Use `neon-code-exec` skill** to create database and get connection string
-2. Configure c15t with Drizzle adapter:
+2. **Configure c15t with Kysely adapter:**
 
 ```tsx
 // lib/c15t.ts
 import { c15tInstance } from '@c15t/backend/v2';
-import { drizzleAdapter } from '@c15t/backend/v2/db/adapters/drizzle';
-import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
-
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql);
+import { kyselyAdapter } from '@c15t/backend/v2/db/adapters/kysely';
+import { Kysely, PostgresDialect } from 'kysely';
+import { Pool } from 'pg';
 
 export const c15t = c15tInstance({
   appName: 'my-app',
   basePath: '/api/c15t',
-  adapter: drizzleAdapter({ db, provider: 'postgresql' }),
+  adapter: kyselyAdapter({
+    db: new Kysely({
+      dialect: new PostgresDialect({
+        pool: new Pool({
+          connectionString: process.env.DATABASE_URL
+        })
+      })
+    }),
+    provider: 'postgresql'
+  }),
   trustedOrigins: ['localhost', 'myapp.com'],
 });
 ```
 
-3. Run migrations: `npx @c15t/cli migrate`
+3. **Run migrations:** Create `scripts/migrate-c15t.ts` (see project example)
+4. **Execute:** `npx tsx scripts/migrate-c15t.ts`
+
+**Required packages:**
+```bash
+npm install kysely pg @c15t/backend @c15t/nextjs
+```
 
 #### Supabase
 
 1. **Use `supabase-code-exec` skill** to execute SQL and manage schema
-2. Configure with Drizzle or direct Supabase client
+2. **Configure with Kysely adapter:**
 
 ```tsx
-import { drizzleAdapter } from '@c15t/backend/v2/db/adapters/drizzle';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-
-const client = postgres(process.env.DATABASE_URL!);
-const db = drizzle(client);
+import { c15tInstance } from '@c15t/backend/v2';
+import { kyselyAdapter } from '@c15t/backend/v2/db/adapters/kysely';
+import { Kysely, PostgresDialect } from 'kysely';
+import { Pool } from 'pg';
 
 export const c15t = c15tInstance({
-  adapter: drizzleAdapter({ db, provider: 'postgresql' }),
+  adapter: kyselyAdapter({
+    db: new Kysely({
+      dialect: new PostgresDialect({
+        pool: new Pool({
+          connectionString: process.env.SUPABASE_DATABASE_URL
+        })
+      })
+    }),
+    provider: 'postgresql'
+  })
 });
 ```
 
@@ -379,7 +575,171 @@ import { Frame } from '@c15t/react';
 | `@c15t/react` | React components and hooks |
 | `@c15t/react-headless` | Headless (no UI) for custom designs |
 | `@c15t/nextjs` | Next.js-optimized components |
+| `@c15t/nextjs/client` | **REQUIRED** for Next.js 15 App Router client components |
 | `@c15t/scripts` | Prebuilt analytics integrations |
 | `@c15t/backend` | Self-hosted backend |
+| `@c15t/backend/v2/db/adapters/kysely` | **REQUIRED** Kysely database adapter |
 | `@c15t/cli` | CLI for setup and migrations |
 | `c15t` | Core vanilla JavaScript library |
+| `kysely` | **REQUIRED** SQL query builder for database adapter |
+| `pg` | **REQUIRED** PostgreSQL client for Kysely |
+
+## 🔧 Troubleshooting Common Errors
+
+### Error: "headers() was called outside a request scope"
+
+**Cause:** ConsentManagerProvider marked as `'use client'` or callbacks/scripts in server component
+
+**Solution:** Separate server and client components (see Critical Implementation Patterns #1)
+
+```tsx
+// ❌ WRONG
+'use client';
+<ConsentManagerProvider options={{ callbacks: {...} }}>
+
+// ✅ CORRECT
+// ConsentProvider.tsx (server - no 'use client')
+<ConsentManagerProvider options={{ mode: 'c15t', ... }}>
+
+// ConsentManagerClient.tsx ('use client')
+<ClientSideOptionsProvider callbacks={{...}}>
+```
+
+### Error: "[fumadb] Drizzle adapter requires query mode"
+
+**Cause:** Using `drizzleAdapter` instead of `kyselyAdapter`
+
+**Solution:** Switch to Kysely adapter (see Critical Implementation Patterns #2)
+
+```bash
+npm install kysely pg
+```
+
+```tsx
+// ❌ WRONG
+import { drizzleAdapter } from '@c15t/backend/v2/db/adapters/drizzle';
+
+// ✅ CORRECT
+import { kyselyAdapter } from '@c15t/backend/v2/db/adapters/kysely';
+import { Kysely, PostgresDialect } from 'kysely';
+import { Pool } from 'pg';
+```
+
+### Error: "Cannot find module '@c15t/nextjs/client'"
+
+**Cause:** Missing package or incorrect import
+
+**Solution:** Install correct package and use proper import
+
+```bash
+npm install @c15t/nextjs
+```
+
+```tsx
+import { ClientSideOptionsProvider } from '@c15t/nextjs/client';
+```
+
+### Error: Banner not showing in development
+
+**Cause:** GeoLocation blocking (c15t hides banner in certain regions by default)
+
+**Solution:** Add `ignoreGeoLocation` flag in development
+
+```tsx
+<ConsentManagerProvider
+  options={{
+    mode: 'c15t',
+    ignoreGeoLocation: process.env.NODE_ENV === 'development', // Always show in dev
+  }}
+>
+```
+
+### Error: Database connection failed
+
+**Cause:** Missing DATABASE_URL or incorrect connection string
+
+**Solution:**
+
+1. Check `.env` or `.env.local`:
+```bash
+DATABASE_URL="postgresql://user:pass@host/db?sslmode=require"
+```
+
+2. Verify connection string format for your database:
+   - **Neon:** `postgresql://[user]:[password]@[endpoint]/[database]?sslmode=require`
+   - **Supabase:** `postgresql://postgres:[password]@[project-ref].pooler.supabase.com:6543/postgres`
+
+3. Test connection:
+```bash
+npx tsx scripts/migrate-c15t.ts
+```
+
+### Error: TypeScript errors on theme customization
+
+**Cause:** Invalid theme keys or complex custom theming
+
+**Solution:** Start with default components, add theming incrementally
+
+```tsx
+// ✅ Start simple
+<CookieBanner />
+
+// ✅ Then add basic styling
+<CookieBanner
+  theme={{
+    'banner.footer.accept-button': 'bg-blue-600 text-white'
+  }}
+/>
+```
+
+For complex theming, see [styling-theming.md](references/styling-theming.md)
+
+### Error: Callbacks not firing
+
+**Cause:** Callbacks in wrong component (server vs client)
+
+**Solution:** Move callbacks to `ClientSideOptionsProvider`
+
+```tsx
+// ❌ WRONG - callbacks in ConsentManagerProvider
+<ConsentManagerProvider options={{ callbacks: {...} }}>
+
+// ✅ CORRECT - callbacks in ClientSideOptionsProvider
+<ClientSideOptionsProvider callbacks={{
+  onConsentSet(response) {
+    console.log('Consent set:', response);
+  }
+}}>
+```
+
+### Build succeeds but runtime error
+
+**Cause:** Component architecture mismatch
+
+**Solution:** Follow exact pattern from Critical Implementation Patterns #3
+
+**Required structure:**
+```
+ConsentProvider (server)
+  └─ ConsentManagerClient (client)
+      ├─ CookieBanner (client)
+      └─ children
+```
+
+### Migration fails with "relation already exists"
+
+**Cause:** Tables already created (safe to ignore if using `IF NOT EXISTS`)
+
+**Solution:** This is normal - migrations are idempotent
+
+If you need fresh tables:
+```sql
+-- Run this in your database console
+DROP TABLE IF EXISTS c15t_consent_preferences CASCADE;
+DROP TABLE IF EXISTS c15t_consent_records CASCADE;
+```
+
+Then re-run migration:
+```bash
+npx tsx scripts/migrate-c15t.ts
+```
