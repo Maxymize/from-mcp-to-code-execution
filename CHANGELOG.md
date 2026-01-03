@@ -5,6 +5,20 @@ All notable changes to the BEYOND-MCP project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.10] - 2026-01-03
+
+### Changed
+- **c15t Consent Skill** - Simplified and improved documentation
+  - Condensed critical patterns into quick reference table
+  - Clearer Server/Client separation guidance
+  - Fixed database adapter recommendation (kyselyAdapter instead of drizzleAdapter)
+  - Improved i18n routing guidance
+  - Backend URL pattern clarification (no query params)
+  - Migration script requirements highlighted
+
+### Updated
+- Project version to 1.0.10
+
 ## [1.0.09] - 2026-01-02
 
 ### Added

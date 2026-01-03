@@ -1,6 +1,6 @@
 {
   "name": "oltre-mcp",
-  "version": "1.0.09",
+  "version": "1.0.10",
   "description": "OLTRE-MCP: Code Execution pattern per server MCP",
   "type": "module",
   "main": "client.js",

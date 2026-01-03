@@ -9,180 +9,24 @@ description: Implement GDPR/CCPA-compliant consent management with c15t. Use whe
 
 c15t is an open-source consent management system for building GDPR, CCPA, and other privacy regulation compliant applications. It provides cookie banners, consent dialogs, script loading based on consent, and backend storage for consent records.
 
-## 🚨 Critical Implementation Patterns
+## 🚨 Critical Patterns (Quick Reference)
 
-**THESE PATTERNS ARE MANDATORY - Follow them to avoid common errors**
+**Avoid these blocking errors - see "Detailed Implementation Patterns" section at the end for full code examples.**
 
-### 1. Next.js 15 App Router: Server/Client Separation
+| Pattern | ❌ WRONG | ✅ CORRECT |
+|---------|----------|------------|
+| **Server/Client Split** | `'use client'` on ConsentManagerProvider | Keep ConsentProvider as SERVER component, callbacks in CLIENT component |
+| **Database Adapter** | `drizzleAdapter` | `kyselyAdapter` with `kysely` + `pg` packages |
+| **i18n Routing** | ConsentProvider in root layout | ConsentProvider in `app/[locale]/layout.tsx` with locale prop |
+| **Backend URL** | `backendURL: '/api/c15t?locale=it'` | `backendURL: '/api/c15t'` (no query params) |
+| **Migrations** | Skip migrations | Run `npx tsx scripts/migrate-c15t.ts` BEFORE using backend |
 
-**❌ WRONG - Will cause "headers() called outside request scope" error:**
-```tsx
-// DON'T: Put everything in a 'use client' component
-'use client';
-import { ConsentManagerProvider } from '@c15t/nextjs';
-
-export function ConsentProvider({ children }) {
-  return (
-    <ConsentManagerProvider options={{ mode: 'c15t', backendURL: '/api/c15t' }}>
-      {/* callbacks here */}
-      {children}
-    </ConsentManagerProvider>
-  );
-}
+**Component nesting order:**
+```
+ConsentProvider (server) → ConsentManagerClient (client) → CookieBanner (client) → children
 ```
 
-**✅ CORRECT - Separate server and client concerns:**
-```tsx
-// ConsentProvider.tsx (SERVER component - no 'use client')
-import { ConsentManagerProvider } from '@c15t/nextjs';
-
-export function ConsentProvider({ children }) {
-  return (
-    <ConsentManagerProvider
-      options={{
-        mode: 'c15t',
-        backendURL: '/api/c15t',
-        consentCategories: ['necessary', 'functionality', 'measurement', 'marketing'],
-        ignoreGeoLocation: process.env.NODE_ENV === 'development',
-        legalLinks: {
-          privacyPolicy: { href: '/privacy', label: 'Privacy Policy' },
-          cookiePolicy: { href: '/cookies', label: 'Cookie Policy' }
-        }
-      }}
-    >
-      {children}
-    </ConsentManagerProvider>
-  );
-}
-
-// ConsentManagerClient.tsx (CLIENT component for callbacks/scripts)
-'use client';
-import { ClientSideOptionsProvider } from '@c15t/nextjs/client';
-
-export function ConsentManagerClient({ children }) {
-  return (
-    <ClientSideOptionsProvider
-      callbacks={{
-        onBannerFetched(response) {
-          console.log('Banner fetched', response);
-        },
-        onConsentSet(response) {
-          console.log('Consent set', response);
-        },
-        onError(error) {
-          console.error('c15t error', error);
-        }
-      }}
-    >
-      {children}
-    </ClientSideOptionsProvider>
-  );
-}
-
-// app/layout.tsx
-import { ConsentProvider } from '@/components/consent/ConsentProvider';
-import { ConsentManagerClient } from '@/components/consent/ConsentManagerClient';
-import { CookieBanner } from '@/components/consent/CookieBanner';
-
-export default function Layout({ children }) {
-  return (
-    <ConsentProvider>
-      <ConsentManagerClient>
-        <CookieBanner />
-        {children}
-      </ConsentManagerClient>
-    </ConsentProvider>
-  );
-}
-```
-
-**Why this matters:**
-- `ConsentManagerProvider` needs to run server-side to access Next.js APIs like `headers()`
-- Callbacks and scripts must be client-side (cannot be serialized)
-- Mixing them causes runtime errors in Next.js 15
-
-### 2. Database Adapter: Use Kysely, NOT Drizzle
-
-**❌ WRONG - Drizzle causes "query mode" errors:**
-```tsx
-import { drizzleAdapter } from '@c15t/backend/v2/db/adapters/drizzle';
-import { drizzle } from 'drizzle-orm/postgres-js';
-
-const db = drizzle(queryClient); // Missing query mode config
-export const c15t = c15tInstance({
-  adapter: drizzleAdapter({ db, provider: 'postgresql' }) // WILL FAIL
-});
-```
-
-**✅ CORRECT - Use Kysely adapter (officially documented):**
-```tsx
-import { kyselyAdapter } from '@c15t/backend/v2/db/adapters/kysely';
-import { Kysely, PostgresDialect } from 'kysely';
-import { Pool } from 'pg';
-
-export const c15t = c15tInstance({
-  adapter: kyselyAdapter({
-    db: new Kysely({
-      dialect: new PostgresDialect({
-        pool: new Pool({
-          connectionString: process.env.DATABASE_URL
-        })
-      })
-    }),
-    provider: 'postgresql'
-  })
-});
-```
-
-**Why this matters:**
-- ALL c15t documentation examples use Kysely
-- Drizzle adapter exists but requires undocumented "query mode" configuration
-- Kysely is the officially supported and tested adapter
-- Using Kysely prevents "[fumadb] Drizzle adapter requires query mode" errors
-
-**Required packages:**
-```bash
-npm install kysely pg
-```
-
-### 3. Component Architecture Pattern
-
-**Required file structure:**
-```
-src/components/consent/
-├── ConsentProvider.tsx          # Server component (options)
-├── ConsentManagerClient.tsx     # Client component (callbacks/scripts)
-├── ConsentMonitor.tsx           # Client component (GA4 integration)
-├── CookieBanner.tsx             # Client component (UI)
-└── GoogleAnalytics.tsx          # Client component (GA script)
-```
-
-**Integration order in layout.tsx:**
-```tsx
-<ConsentProvider>              {/* Server: base configuration */}
-  <ConsentManagerClient>       {/* Client: callbacks, scripts */}
-    <CookieBanner />          {/* Client: UI component */}
-    {children}
-  </ConsentManagerClient>
-</ConsentProvider>
-```
-
-### 4. Database Migration
-
-**Always run migrations BEFORE using c15t backend:**
-```bash
-npx tsx scripts/migrate-c15t.ts
-```
-
-**Migration creates:**
-- `c15t_consent_records` - Main consent storage
-- `c15t_consent_preferences` - Category-level tracking
-- 5 optimized indexes
-
-**Check existing implementation in project:**
-- Migration script: `scripts/migrate-c15t.ts`
-- Uses Neon serverless SQL client
-- Safe to run multiple times (uses `IF NOT EXISTS`)
+**Required packages:** `@c15t/nextjs`, `@c15t/backend`, `kysely`, `pg`
 
 ## Workflow Decision Tree
 
@@ -590,7 +434,7 @@ import { Frame } from '@c15t/react';
 
 **Cause:** ConsentManagerProvider marked as `'use client'` or callbacks/scripts in server component
 
-**Solution:** Separate server and client components (see Critical Implementation Patterns #1)
+**Solution:** Separate server and client components (see **Pattern 1** in "Detailed Implementation Patterns" section)
 
 ```tsx
 // ❌ WRONG
@@ -605,11 +449,13 @@ import { Frame } from '@c15t/react';
 <ClientSideOptionsProvider callbacks={{...}}>
 ```
 
+**Special case: Localized apps with `[locale]` routing** - See **Pattern 4** in "Detailed Implementation Patterns" section for complete i18n solution.
+
 ### Error: "[fumadb] Drizzle adapter requires query mode"
 
 **Cause:** Using `drizzleAdapter` instead of `kyselyAdapter`
 
-**Solution:** Switch to Kysely adapter (see Critical Implementation Patterns #2)
+**Solution:** Switch to Kysely adapter (see **Pattern 2** in "Detailed Implementation Patterns" section)
 
 ```bash
 npm install kysely pg
@@ -716,7 +562,7 @@ For complex theming, see [styling-theming.md](references/styling-theming.md)
 
 **Cause:** Component architecture mismatch
 
-**Solution:** Follow exact pattern from Critical Implementation Patterns #3
+**Solution:** Follow exact pattern from **Pattern 3** in "Detailed Implementation Patterns" section
 
 **Required structure:**
 ```
@@ -743,3 +589,317 @@ Then re-run migration:
 ```bash
 npx tsx scripts/migrate-c15t.ts
 ```
+
+---
+
+## 📖 Detailed Implementation Patterns (Reference)
+
+**This section contains complete code examples for the patterns summarized in "Critical Patterns (Quick Reference)" at the top.**
+
+### Pattern 1: Next.js 15 App Router - Server/Client Separation
+
+**❌ WRONG - Will cause "headers() called outside request scope" error:**
+```tsx
+// DON'T: Put everything in a 'use client' component
+'use client';
+import { ConsentManagerProvider } from '@c15t/nextjs';
+
+export function ConsentProvider({ children }) {
+  return (
+    <ConsentManagerProvider options={{ mode: 'c15t', backendURL: '/api/c15t' }}>
+      {/* callbacks here */}
+      {children}
+    </ConsentManagerProvider>
+  );
+}
+```
+
+**✅ CORRECT - Separate server and client concerns:**
+```tsx
+// ConsentProvider.tsx (SERVER component - no 'use client')
+import { ConsentManagerProvider } from '@c15t/nextjs';
+
+export function ConsentProvider({ children }) {
+  return (
+    <ConsentManagerProvider
+      options={{
+        mode: 'c15t',
+        backendURL: '/api/c15t',
+        consentCategories: ['necessary', 'functionality', 'measurement', 'marketing'],
+        ignoreGeoLocation: process.env.NODE_ENV === 'development',
+        legalLinks: {
+          privacyPolicy: { href: '/privacy', label: 'Privacy Policy' },
+          cookiePolicy: { href: '/cookies', label: 'Cookie Policy' }
+        }
+      }}
+    >
+      {children}
+    </ConsentManagerProvider>
+  );
+}
+
+// ConsentManagerClient.tsx (CLIENT component for callbacks/scripts)
+'use client';
+import { ClientSideOptionsProvider } from '@c15t/nextjs/client';
+
+export function ConsentManagerClient({ children }) {
+  return (
+    <ClientSideOptionsProvider
+      callbacks={{
+        onBannerFetched(response) {
+          console.log('Banner fetched', response);
+        },
+        onConsentSet(response) {
+          console.log('Consent set', response);
+        },
+        onError(error) {
+          console.error('c15t error', error);
+        }
+      }}
+    >
+      {children}
+    </ClientSideOptionsProvider>
+  );
+}
+
+// app/layout.tsx
+import { ConsentProvider } from '@/components/consent/ConsentProvider';
+import { ConsentManagerClient } from '@/components/consent/ConsentManagerClient';
+import { CookieBanner } from '@/components/consent/CookieBanner';
+
+export default function Layout({ children }) {
+  return (
+    <ConsentProvider>
+      <ConsentManagerClient>
+        <CookieBanner />
+        {children}
+      </ConsentManagerClient>
+    </ConsentProvider>
+  );
+}
+```
+
+**Why this matters:**
+- `ConsentManagerProvider` needs to run server-side to access Next.js APIs like `headers()`
+- Callbacks and scripts must be client-side (cannot be serialized)
+- Mixing them causes runtime errors in Next.js 15
+
+### Pattern 2: Database Adapter - Kysely (NOT Drizzle)
+
+**❌ WRONG - Drizzle causes "query mode" errors:**
+```tsx
+import { drizzleAdapter } from '@c15t/backend/v2/db/adapters/drizzle';
+import { drizzle } from 'drizzle-orm/postgres-js';
+
+const db = drizzle(queryClient); // Missing query mode config
+export const c15t = c15tInstance({
+  adapter: drizzleAdapter({ db, provider: 'postgresql' }) // WILL FAIL
+});
+```
+
+**✅ CORRECT - Use Kysely adapter (officially documented):**
+```tsx
+import { kyselyAdapter } from '@c15t/backend/v2/db/adapters/kysely';
+import { Kysely, PostgresDialect } from 'kysely';
+import { Pool } from 'pg';
+
+export const c15t = c15tInstance({
+  adapter: kyselyAdapter({
+    db: new Kysely({
+      dialect: new PostgresDialect({
+        pool: new Pool({
+          connectionString: process.env.DATABASE_URL
+        })
+      })
+    }),
+    provider: 'postgresql'
+  })
+});
+```
+
+**Why this matters:**
+- ALL c15t documentation examples use Kysely
+- Drizzle adapter exists but requires undocumented "query mode" configuration
+- Kysely is the officially supported and tested adapter
+- Using Kysely prevents "[fumadb] Drizzle adapter requires query mode" errors
+
+**Required packages:**
+```bash
+npm install kysely pg
+```
+
+### Pattern 3: Component Architecture
+
+**Required file structure:**
+```
+src/components/consent/
+├── ConsentProvider.tsx          # Server component (options)
+├── ConsentManagerClient.tsx     # Client component (callbacks/scripts)
+├── ConsentMonitor.tsx           # Client component (GA4 integration)
+├── CookieBanner.tsx             # Client component (UI)
+└── GoogleAnalytics.tsx          # Client component (GA script)
+```
+
+**Integration order in layout.tsx:**
+```tsx
+<ConsentProvider>              {/* Server: base configuration */}
+  <ConsentManagerClient>       {/* Client: callbacks, scripts */}
+    <CookieBanner />          {/* Client: UI component */}
+    {children}
+  </ConsentManagerClient>
+</ConsentProvider>
+```
+
+### Pattern 4: Internationalization (i18n) with Dynamic Language Switching
+
+**Problem:** Cookie banner doesn't change language when user switches locale via language selector (requires hard refresh)
+
+**Root Cause:** Using client-side locale detection (`usePathname()`) inside a client component that wraps `ConsentManagerProvider`
+
+**✅ CORRECT Architecture for i18n:**
+
+1. **Place ConsentProvider in `[locale]/layout.tsx`** (not root layout):
+```tsx
+// app/[locale]/layout.tsx - SERVER component
+import { ConsentProvider } from '@/components/consent/ConsentProvider';
+
+type SupportedLocale = 'en' | 'it' | 'es';
+
+export default async function LocaleLayout({ children, params }) {
+  const { locale } = await params;
+  const supportedLocales: SupportedLocale[] = ['en', 'it', 'es'];
+  const validLocale = supportedLocales.includes(locale as SupportedLocale)
+    ? (locale as SupportedLocale)
+    : 'en';
+
+  // ConsentProvider is a SERVER component - receives locale from URL params
+  return (
+    <ConsentProvider locale={validLocale}>
+      {children}
+    </ConsentProvider>
+  );
+}
+```
+
+2. **Create ConsentProvider as SERVER component** (no 'use client'):
+```tsx
+// src/components/consent/ConsentProvider.tsx - NO 'use client'
+import { ConsentManagerProvider } from '@c15t/nextjs';
+import { ConsentManagerClient } from './ConsentManagerClient';
+import { CookieBannerClient } from './CookieBannerClient';
+
+export function ConsentProvider({ children, locale = 'en' }) {
+  const legalLinks = {
+    privacyPolicy: {
+      href: `/${locale}/legal/privacy-policy`,
+      label: locale === 'it' ? 'Informativa sulla Privacy' :
+             locale === 'es' ? 'Política de Privacidad' :
+             'Privacy Policy'
+    },
+    cookiePolicy: {
+      href: `/${locale}/legal/cookie-policy`,
+      label: locale === 'it' ? 'Politica sui Cookie' :
+             locale === 'es' ? 'Política de Cookies' :
+             'Cookie Policy'
+    }
+  };
+
+  return (
+    <ConsentManagerProvider
+      options={{
+        mode: 'c15t',
+        backendURL: '/api/c15t',  // NO query params - use Referer header
+        consentCategories: ['necessary', 'functionality', 'measurement', 'marketing'],
+        ignoreGeoLocation: process.env.NODE_ENV === 'development',
+        legalLinks,
+      }}
+    >
+      <ConsentManagerClient>
+        <CookieBannerClient locale={locale} legalLinks={legalLinks} />
+        {children}
+      </ConsentManagerClient>
+    </ConsentManagerProvider>
+  );
+}
+```
+
+3. **Create CookieBannerClient as CLIENT component** with translated text:
+```tsx
+// src/components/consent/CookieBannerClient.tsx
+'use client';
+
+import { CookieBanner, ConsentManagerDialog } from '@c15t/nextjs';
+import { getDirectTranslations } from '@/lib/c15t-translations';
+
+export function CookieBannerClient({ locale, legalLinks }) {
+  const translations = getDirectTranslations(locale);
+
+  return (
+    <>
+      <CookieBanner
+        title={translations.cookieBanner.title}
+        description={translations.cookieBanner.description}
+        acceptButtonText={translations.common.acceptAll}
+        rejectButtonText={translations.common.rejectAll}
+        customizeButtonText={translations.common.customize}
+      />
+      <ConsentManagerDialog legalLinks={['privacyPolicy', 'cookiePolicy']} />
+    </>
+  );
+}
+```
+
+4. **Create translations file:**
+```tsx
+// src/lib/c15t-translations.ts
+const translations = {
+  en: {
+    common: { acceptAll: 'Accept All', rejectAll: 'Reject All', customize: 'Customize' },
+    cookieBanner: {
+      title: 'We Respect Your Privacy',
+      description: 'This site uses cookies to enhance your browsing experience...'
+    }
+  },
+  it: {
+    common: { acceptAll: 'Accetta Tutto', rejectAll: 'Rifiuta Tutto', customize: 'Personalizza' },
+    cookieBanner: {
+      title: 'Rispettiamo la Tua Privacy',
+      description: 'Questo sito utilizza cookie per migliorare la tua esperienza...'
+    }
+  },
+  es: { /* Spanish translations */ }
+};
+
+export function getDirectTranslations(locale: 'en' | 'it' | 'es') {
+  return translations[locale] || translations.en;
+}
+```
+
+**Why this works:**
+- Locale comes from Next.js routing params (server-side)
+- No client-side `usePathname()` or `window.location` detection
+- When user navigates to `/it/`, Next.js renders with `locale='it'`
+- `ConsentProvider` re-renders with new locale automatically
+- No hard refresh needed
+
+**Key points:**
+- `backendURL` should be plain `/api/c15t` (no query parameters)
+- API route can extract locale from `Referer` header if needed
+- Direct text props on `CookieBanner` ensure immediate translation updates
+
+### Pattern 5: Database Migration
+
+**Always run migrations BEFORE using c15t backend:**
+```bash
+npx tsx scripts/migrate-c15t.ts
+```
+
+**Migration creates:**
+- `c15t_consent_records` - Main consent storage
+- `c15t_consent_preferences` - Category-level tracking
+- 5 optimized indexes
+
+**Check existing implementation in project:**
+- Migration script: `scripts/migrate-c15t.ts`
+- Uses Neon serverless SQL client
+- Safe to run multiple times (uses `IF NOT EXISTS`)
