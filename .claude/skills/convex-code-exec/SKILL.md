@@ -386,6 +386,70 @@ export const myFunction = query({
 - Deploy key doesn't have write permission
 - Use production deploy key, not dev
 
+## Production Data Seeding
+
+When you need to seed data in Production (fresh environment), use a Node.js script with `ConvexHttpClient`.
+
+### Why CLI Doesn't Work for Production
+
+1. **`npx convex run`** reads deployment from `.env.local` (Development)
+2. **`CONVEX_DEPLOYMENT=prod:xxx`** override doesn't work for `run` command
+3. **`internalMutation`** functions are not callable from CLI
+
+### Solution: Script with ConvexHttpClient
+
+```javascript
+#!/usr/bin/env node
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../convex/_generated/api.js";
+
+// Point DIRECTLY to Production URL
+const PRODUCTION_URL = "https://your-production-deployment.convex.cloud";
+const client = new ConvexHttpClient(PRODUCTION_URL);
+
+// Execute public mutations
+await client.mutation(api.prices.seedLivePrices, { prices: [...] });
+await client.mutation(api.relationshipTypes.seedDefaultTypes, {});
+
+// Verify with queries
+const prices = await client.query(api.prices.getPublicPrices, {});
+console.log(`Found ${prices.length} prices`);
+```
+
+### Complete Workflow
+
+```bash
+# 1. Deploy functions to Production
+npx convex deploy --yes
+
+# 2. Run the seeding script
+node scripts/seed-production-data.mjs
+```
+
+### Best Practices for Seeding Mutations
+
+| Principle | Description |
+|-----------|-------------|
+| **Idempotent** | Always check if data exists before inserting |
+| **Public mutations** | Create public mutations for CLI/script access (internal mutations cannot be called externally) |
+| **Multilingual support** | Include localized fields if your app supports multiple languages |
+
+### Important Notes
+
+1. **ConvexHttpClient doesn't require auth**: Public mutations are callable directly
+2. **Idempotent mutations**: They should check if data exists before inserting
+3. **Script location**: Create a script in `scripts/` folder (e.g., `seed-production-data.mjs`)
+4. **Deployment URL**: Find your Production URL in Convex Dashboard → Settings
+
+### Verify Production Data
+
+```javascript
+// Verify seeded data using public queries
+const items = await client.query(api.yourModule.getItems, {});
+console.log(`Found ${items.length} items`);
+items.forEach(item => console.log(`- ${item.name}: ${item.value}`));
+```
+
 ## References
 
 - [Convex Documentation](https://docs.convex.dev)
@@ -394,6 +458,7 @@ export const myFunction = query({
 - [Convex Deployment API](https://docs.convex.dev/deployment-platform-api)
 - [Convex Management API](https://api.convex.dev/v1/openapi.json)
 - [Anthropic Code Execution Pattern](https://www.anthropic.com/engineering/code-execution-with-mcp)
+- [CoupleCompatibility Migration Guide](../../docs/convex/CONVEX-DATA-MIGRATION-GUIDE.md)
 
 ## MCP Delegation (for 3 features not in this skill)
 

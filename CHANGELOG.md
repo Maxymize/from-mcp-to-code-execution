@@ -5,6 +5,19 @@ All notable changes to the BEYOND-MCP project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.11] - 2026-01-05
+
+### Changed
+- **Convex Code Execution Skill** - Added Production Data Seeding documentation
+  - ConvexHttpClient approach for seeding production data
+  - Why CLI doesn't work for production (env limitations)
+  - Complete workflow with script examples
+  - Best practices for idempotent mutations
+  - Verification patterns for seeded data
+
+### Updated
+- Project version to 1.0.11
+
 ## [1.0.10] - 2026-01-03
 
 ### Changed
