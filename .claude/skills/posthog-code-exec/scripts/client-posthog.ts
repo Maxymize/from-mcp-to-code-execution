@@ -600,6 +600,26 @@ export class PostHogClient {
     });
   }
 
+  /**
+   * Get experiment results with metrics and exposure data
+   */
+  async getExperimentResults(experimentId: number): Promise<{
+    insight: any[];
+    filters: any;
+    probability: Record<string, number>;
+    significant: boolean;
+    expected_loss?: number;
+    variants: Array<{
+      key: string;
+      count: number;
+      exposure: number;
+      absolute_exposure: number;
+    }>;
+  }> {
+    const projectId = this.getProjectId();
+    return this.request(`/projects/${projectId}/experiments/${experimentId}/results/`);
+  }
+
   // ==========================================================================
   // Surveys API
   // ==========================================================================
@@ -652,6 +672,31 @@ export class PostHogClient {
     });
   }
 
+  /**
+   * Get survey response statistics
+   */
+  async getSurveyStats(surveyId: string): Promise<{
+    total_responses: number;
+    responses_by_question: Record<string, any>;
+    completion_rate: number;
+  }> {
+    const projectId = this.getProjectId();
+    return this.request(`/projects/${projectId}/surveys/${surveyId}/stats/`);
+  }
+
+  /**
+   * Get aggregated statistics across all surveys
+   */
+  async getSurveysGlobalStats(): Promise<{
+    total_surveys: number;
+    total_responses: number;
+    surveys_by_type: Record<string, number>;
+    average_completion_rate: number;
+  }> {
+    const projectId = this.getProjectId();
+    return this.request(`/projects/${projectId}/surveys/stats/`);
+  }
+
   // ==========================================================================
   // Organization & Project API
   // ==========================================================================
@@ -661,6 +706,22 @@ export class PostHogClient {
    */
   async getOrganizations(): Promise<{ results: any[] }> {
     return this.request('/organizations/');
+  }
+
+  /**
+   * Get organization details
+   */
+  async getOrganizationDetails(organizationId: string): Promise<{
+    id: string;
+    name: string;
+    slug: string;
+    created_at: string;
+    updated_at: string;
+    membership_level: number;
+    available_features: string[];
+    is_member_join_email_enabled: boolean;
+  }> {
+    return this.request(`/organizations/${organizationId}/`);
   }
 
   /**
@@ -693,6 +754,60 @@ export class PostHogClient {
     const projectId = this.getProjectId();
     const query = type ? `?type=${type}` : '';
     return this.request(`/projects/${projectId}/property_definitions/${query}`);
+  }
+
+  // ==========================================================================
+  // Insights Query API
+  // ==========================================================================
+
+  /**
+   * Execute a query on an existing insight to get its results/data
+   */
+  async queryInsight(insightId: number, options?: {
+    refresh?: boolean;
+    from_dashboard?: number;
+  }): Promise<any> {
+    const projectId = this.getProjectId();
+    const params = new URLSearchParams();
+    if (options?.refresh) params.set('refresh', 'true');
+    if (options?.from_dashboard) params.set('from_dashboard', options.from_dashboard.toString());
+
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/projects/${projectId}/insights/${insightId}/query/${query}`, {
+      method: 'POST'
+    });
+  }
+
+  // ==========================================================================
+  // LLM Analytics API
+  // ==========================================================================
+
+  /**
+   * Get total LLM daily costs for each model over a given number of days
+   */
+  async getLLMCosts(options?: {
+    days?: number;
+    date_from?: string;
+    date_to?: string;
+  }): Promise<{
+    results: Array<{
+      date: string;
+      model: string;
+      total_cost: number;
+      total_tokens: number;
+      input_tokens: number;
+      output_tokens: number;
+    }>;
+    total_cost: number;
+  }> {
+    const projectId = this.getProjectId();
+    const params = new URLSearchParams();
+    if (options?.days) params.set('days', options.days.toString());
+    if (options?.date_from) params.set('date_from', options.date_from);
+    if (options?.date_to) params.set('date_to', options.date_to);
+
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/projects/${projectId}/llm_observability/costs/${query}`);
   }
 }
 

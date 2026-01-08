@@ -239,6 +239,18 @@ const experiment = await posthog.createExperiment({
 console.log(`Created experiment: ${experiment.name} (ID: ${experiment.id})`);
 ```
 
+### Get experiment results
+```typescript
+const results = await posthog.getExperimentResults(experimentId);
+
+console.log(`Significant: ${results.significant ? 'Yes' : 'No'}`);
+console.log(`Variants:`);
+results.variants.forEach(v => {
+  console.log(`  - ${v.key}: ${v.count} conversions (${v.exposure} exposure)`);
+  console.log(`    Probability: ${(results.probability[v.key] * 100).toFixed(1)}%`);
+});
+```
+
 ## Surveys
 
 ### List all surveys
@@ -288,6 +300,33 @@ const survey = await posthog.createSurvey({
 console.log(`Created survey: ${survey.name} (ID: ${survey.id})`);
 ```
 
+### Get survey statistics
+```typescript
+const stats = await posthog.getSurveyStats(surveyId);
+console.log(`Total responses: ${stats.total_responses}`);
+console.log(`Completion rate: ${(stats.completion_rate * 100).toFixed(1)}%`);
+```
+
+### Get global surveys statistics
+```typescript
+const globalStats = await posthog.getSurveysGlobalStats();
+console.log(`Total surveys: ${globalStats.total_surveys}`);
+console.log(`Total responses: ${globalStats.total_responses}`);
+console.log(`Average completion: ${(globalStats.average_completion_rate * 100).toFixed(1)}%`);
+```
+
+## LLM Analytics
+
+### Get LLM costs
+```typescript
+const costs = await posthog.getLLMCosts({ days: 30 });
+
+console.log(`Total cost (30 days): $${costs.total_cost.toFixed(2)}`);
+costs.results.forEach(r => {
+  console.log(`  ${r.date} - ${r.model}: $${r.total_cost.toFixed(4)} (${r.total_tokens} tokens)`);
+});
+```
+
 ## Organization & Project Management
 
 ### List organizations
@@ -297,6 +336,13 @@ const { results: orgs } = await posthog.getOrganizations();
 orgs.forEach(org => {
   console.log(`- ${org.name} (${org.id})`);
 });
+```
+
+### Get organization details
+```typescript
+const orgDetails = await posthog.getOrganizationDetails('org_123');
+console.log(`Organization: ${orgDetails.name}`);
+console.log(`Features: ${orgDetails.available_features.join(', ')}`);
 ```
 
 ### List projects
@@ -333,19 +379,58 @@ properties.forEach(prop => {
 
 ## API Coverage
 
-This skill covers **all 42 MCP tools** from the PostHog MCP server:
+This skill covers **all 45 MCP tools** from the PostHog MCP server:
 
-| Category | Tools Covered |
-|----------|---------------|
-| **Dashboards** (6) | add-insight-to-dashboard, dashboard-create, dashboard-delete, dashboard-get, dashboards-get-all, dashboard-update |
-| **Feature Flags** (5) | create-feature-flag, delete-feature-flag, feature-flag-get-all, feature-flag-get-definition, update-feature-flag |
-| **Experiments** (6) | experiment-get-all, experiment-create, experiment-delete, experiment-update, experiment-get, experiment-results-get |
-| **Insights & Analytics** (6) | insight-create-from-query, insight-delete, insight-get, insight-query, insights-get-all, insight-update, query-run |
-| **Surveys** (7) | survey-create, survey-get, surveys-get-all, survey-update, survey-delete, surveys-global-stats, survey-stats |
-| **Events & Properties** (3) | event-definitions-list, properties-list, property-definitions |
-| **Organization & Project** (5) | organization-details-get, organizations-get, switch-organization, projects-get, switch-project |
-| **Error Tracking** (2) | list-errors, error-details |
-| **Other** (2) | docs-search (use WebSearch instead), get-llm-total-costs-for-project |
+| Category | MCP Tool | Client Method |
+|----------|----------|---------------|
+| **Dashboards (6)** | dashboards-get-all | `getDashboards()` |
+| | dashboard-get | `getDashboard()` |
+| | dashboard-create | `createDashboard()` |
+| | dashboard-update | `updateDashboard()` |
+| | dashboard-delete | `deleteDashboard()` |
+| | add-insight-to-dashboard | `addInsightToDashboard()` |
+| **Feature Flags (5)** | feature-flag-get-all | `getFeatureFlags()` |
+| | feature-flag-get-definition | `getFeatureFlag()` / `getFeatureFlagByKey()` |
+| | create-feature-flag | `createFeatureFlag()` |
+| | update-feature-flag | `updateFeatureFlag()` |
+| | delete-feature-flag | `deleteFeatureFlag()` |
+| **Experiments (6)** | experiment-get-all | `getExperiments()` |
+| | experiment-get | `getExperiment()` |
+| | experiment-results-get | `getExperimentResults()` |
+| | experiment-create | `createExperiment()` |
+| | experiment-update | `updateExperiment()` |
+| | experiment-delete | `deleteExperiment()` |
+| **Insights (6)** | insights-get-all | `getInsights()` |
+| | insight-get | `getInsight()` |
+| | insight-create-from-query | `createInsight()` |
+| | insight-update | `updateInsight()` |
+| | insight-delete | `deleteInsight()` |
+| | insight-query | `queryInsight()` |
+| **Queries (2)** | query-run | `runQuery()` |
+| | query-generate-hogql-from-question | ⚡ HYBRID - requires AI |
+| **Surveys (7)** | surveys-get-all | `getSurveys()` |
+| | survey-get | `getSurvey()` |
+| | survey-create | `createSurvey()` |
+| | survey-update | `updateSurvey()` |
+| | survey-delete | `deleteSurvey()` |
+| | survey-stats | `getSurveyStats()` |
+| | surveys-global-stats | `getSurveysGlobalStats()` |
+| **Events & Props (2)** | event-definitions-list | `getEventDefinitions()` |
+| | properties-list | `getPropertyDefinitions()` |
+| **Org & Project (6)** | organizations-get | `getOrganizations()` |
+| | organization-details-get | `getOrganizationDetails()` |
+| | switch-organization | Use `setProjectId()` after getting org |
+| | projects-get | `getProjects()` |
+| | switch-project | `setProjectId()` |
+| | property-definitions | `getPropertyDefinitions()` |
+| **Error Tracking (2)** | list-errors | `listErrors()` |
+| | error-details | `getErrorDetails()` |
+| **LLM Analytics (1)** | get-llm-total-costs-for-project | `getLLMCosts()` |
+| **Documentation (1)** | docs-search | Use WebSearch tool instead |
+
+### Hybrid Note
+
+The tool `query-generate-hogql-from-question` requires AI/LLM processing to generate HogQL from natural language. Use the MCP server for this specific functionality, or use `runQuery()` with manually written HogQL.
 
 ## Recommended Patterns
 

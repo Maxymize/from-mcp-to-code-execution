@@ -5,6 +5,23 @@ All notable changes to the BEYOND-MCP project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.12] - 2026-01-09
+
+### Changed
+- **PostHog Code Execution Skill** - Updated to cover all 45 MCP tools
+  - Added `getExperimentResults()` for experiment metrics and exposure data
+  - Added `getSurveyStats()` for individual survey statistics
+  - Added `getSurveysGlobalStats()` for aggregated survey statistics
+  - Added `getOrganizationDetails()` for organization details
+  - Added `queryInsight()` for executing queries on existing insights
+  - Added `getLLMCosts()` for LLM analytics and cost tracking
+  - Updated SKILL.md with complete API coverage table
+  - Added examples for all new methods
+  - Marked `query-generate-hogql-from-question` as HYBRID (requires AI)
+
+### Updated
+- Project version to 1.0.12
+
 ## [1.0.11] - 2026-01-05
 
 ### Changed
