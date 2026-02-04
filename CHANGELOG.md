@@ -5,6 +5,33 @@ All notable changes to the BEYOND-MCP project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.13] - 2026-02-04
+
+### Added
+- **Railway Code Execution Skill** - Complete Direct Connection implementation
+  - Full TypeScript client for Railway GraphQL API (`client-railway.ts`)
+  - Covers all 14 MCP tools from official Railway MCP server
+  - 99%+ token reduction vs traditional MCP approach
+  - 50+ API operations (40+ beyond MCP capabilities):
+    - Projects (list, get, create, update, delete, transfer)
+    - Services (list, get, create, update, delete, connect/disconnect)
+    - Service Instances (get config, update build/deploy settings)
+    - Deployments (list, deploy, redeploy, rollback, stop, cancel, restart)
+    - Environments (list, get, create, rename, delete)
+    - Variables (get, set single/batch, delete)
+    - Logs (build logs, runtime logs, HTTP logs, environment logs)
+    - Domains (generate Railway domain, add custom domain)
+    - Volumes (create, backup)
+    - TCP Proxies (list)
+    - Regions (list available)
+    - Templates (deploy from template)
+  - Comprehensive SKILL.md documentation with 30+ examples
+  - Support for all three token types (Personal, Team, Project)
+  - Full TypeScript type definitions
+
+### Updated
+- Project version to 1.0.13
+
 ## [1.0.12] - 2026-01-09
 
 ### Changed
